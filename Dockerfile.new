@@ -1,0 +1,47 @@
+# Use the base node image
+FROM node:18-alpine AS build-stage
+
+# Install Python, make, g++, and distutils for native module building
+RUN apk add --no-cache python3 make g++ \
+    && apk add --no-cache py3-setuptools \
+    && apk add --no-cache build-base \
+    && apk add --no-cache python3-dev
+
+# Set the desired timezone
+ENV TZ=Asia/Kolkata
+
+# Set the working directory
+WORKDIR /app
+
+# Copy package.json and package-lock.json (if present)
+COPY package*.json ./
+
+# Install both production and development dependencies to enable the build
+RUN npm install
+
+# Copy the rest of the application code
+COPY . .
+
+# Build the application (this will generate the `dist` folder)
+RUN npm run build
+
+# Final production image
+FROM node:18-alpine AS production
+
+# Set working directory
+WORKDIR /app
+
+# Copy the built `dist` folder from the build stage to the production stage
+COPY --from=build-stage /app/dist ./dist
+
+# Copy the `node_modules` folder from the build stage
+COPY --from=build-stage /app/node_modules ./node_modules
+
+# Copy the package.json files
+COPY --from=build-stage /app/package*.json ./
+
+# Expose the port
+EXPOSE 2552
+
+# Start the application
+CMD ["node", "dist/server.js"]

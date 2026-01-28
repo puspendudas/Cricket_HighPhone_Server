@@ -1,0 +1,25 @@
+version: '3.7'
+services:
+  node-app:
+    image: puspenduofficial/matkaback:latest
+    container_name: matka
+    ports:
+      - "2535:2552"
+    environment:
+      NODE_ENV: production
+      TZ: Asia/Kolkata
+    env_file:
+      - .env
+    volumes:
+    - ./logs:/app/logs
+    - ./assets:/app/dist/assets
+    - ./public:/app/dist/public
+    restart: always
+#     networks:
+#       myipvlan:
+#         ipv4_address: 192.168.0.19
+
+# networks:
+#   myipvlan:
+#     external: true
+#     name: br0

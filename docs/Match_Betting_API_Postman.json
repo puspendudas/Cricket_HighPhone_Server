@@ -1,0 +1,345 @@
+{
+  "info": {
+    "name": "Cricket Match Betting API",
+    "description": "Complete API collection for cricket match betting system with BOOKMAKER and FANCY bet types",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Match Betting",
+      "item": [
+        {
+          "name": "Create BOOKMAKER Bet (Back)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"match_id\": \"{{match_id}}\",\n  \"bet_type\": \"BOOKMAKER\",\n  \"selection\": \"Back\",\n  \"selection_id\": 47972,\n  \"odds_value\": \"1.85\",\n  \"odds_rate\": \"85\",\n  \"stake_amount\": 100,\n  \"team_name\": \"India\",\n  \"game_id\": \"32540047\",\n  \"event_id\": \"32540047\",\n  \"min_stake\": 10,\n  \"max_stake\": 10000,\n  \"is_active\": true,\n  \"is_enabled\": true,\n  \"bet_metadata\": {\n    \"market_type\": \"match_odds\",\n    \"runner_type\": \"team\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "create"]
+            },
+            "description": "Create a BOOKMAKER Back bet on a team to win"
+          }
+        },
+        {
+          "name": "Create BOOKMAKER Bet (Lay)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"match_id\": \"{{match_id}}\",\n  \"bet_type\": \"BOOKMAKER\",\n  \"selection\": \"Lay\",\n  \"selection_id\": 47973,\n  \"odds_value\": \"2.15\",\n  \"odds_rate\": \"115\",\n  \"stake_amount\": 200,\n  \"team_name\": \"Australia\",\n  \"game_id\": \"32540047\",\n  \"event_id\": \"32540047\",\n  \"min_stake\": 10,\n  \"max_stake\": 10000,\n  \"is_active\": true,\n  \"is_enabled\": true,\n  \"bet_metadata\": {\n    \"market_type\": \"match_odds\",\n    \"runner_type\": \"team\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "create"]
+            },
+            "description": "Create a BOOKMAKER Lay bet against a team"
+          }
+        },
+        {
+          "name": "Create FANCY Bet (Yes)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"match_id\": \"{{match_id}}\",\n  \"bet_type\": \"FANCY\",\n  \"selection\": \"Yes\",\n  \"market_id\": \"1.200345678\",\n  \"odds_value\": \"150\",\n  \"odds_rate\": \"90\",\n  \"stake_amount\": 50,\n  \"session_name\": \"India 1st Innings Runs\",\n  \"runner_name\": \"Over 150.5\",\n  \"game_id\": \"32540047\",\n  \"event_id\": \"32540047\",\n  \"sid\": \"200345678\",\n  \"min_stake\": 5,\n  \"max_stake\": 5000,\n  \"is_active\": true,\n  \"is_enabled\": true,\n  \"bet_metadata\": {\n    \"market_type\": \"session\",\n    \"session_type\": \"runs\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "create"]
+            },
+            "description": "Create a FANCY Yes bet on a session market"
+          }
+        },
+        {
+          "name": "Create FANCY Bet (Not)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"user_id\": \"{{user_id}}\",\n  \"match_id\": \"{{match_id}}\",\n  \"bet_type\": \"FANCY\",\n  \"selection\": \"Not\",\n  \"market_id\": \"1.200345679\",\n  \"odds_value\": \"75\",\n  \"odds_rate\": \"110\",\n  \"stake_amount\": 75,\n  \"session_name\": \"Total Sixes\",\n  \"runner_name\": \"Under 12.5\",\n  \"game_id\": \"32540047\",\n  \"event_id\": \"32540047\",\n  \"sid\": \"200345679\",\n  \"min_stake\": 5,\n  \"max_stake\": 5000,\n  \"is_active\": true,\n  \"is_enabled\": true,\n  \"bet_metadata\": {\n    \"market_type\": \"session\",\n    \"session_type\": \"sixes\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/create",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "create"]
+            },
+            "description": "Create a FANCY Not bet on a session market"
+          }
+        },
+        {
+          "name": "Get All Match Bets",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets?skip=0&count=20&status=PENDING",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets"],
+              "query": [
+                {
+                  "key": "skip",
+                  "value": "0"
+                },
+                {
+                  "key": "count",
+                  "value": "20"
+                },
+                {
+                  "key": "status",
+                  "value": "PENDING"
+                }
+              ]
+            },
+            "description": "Get all match bets with pagination and filters"
+          }
+        },
+        {
+          "name": "Get Match Bets by Match ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/match/{{match_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "match", "{{match_id}}"]
+            },
+            "description": "Get all bets for a specific match"
+          }
+        },
+        {
+          "name": "Get User Bets for Match",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/match/{{match_id}}/user/{{user_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "match", "{{match_id}}", "user", "{{user_id}}"]
+            },
+            "description": "Get all bets for a specific user on a specific match"
+          }
+        },
+        {
+          "name": "Get BOOKMAKER Bets for Match",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/match/{{match_id}}/bookmaker",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "match", "{{match_id}}", "bookmaker"]
+            },
+            "description": "Get only BOOKMAKER bets for a specific match"
+          }
+        },
+        {
+          "name": "Get FANCY Bets for Match",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/match/{{match_id}}/fancy",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "match", "{{match_id}}", "fancy"]
+            },
+            "description": "Get only FANCY bets for a specific match"
+          }
+        },
+        {
+          "name": "Get Bet by ID",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/{{bet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "{{bet_id}}"]
+            },
+            "description": "Get a specific bet by its ID"
+          }
+        },
+        {
+          "name": "Update Match Bet",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"odds_rate\": \"95\",\n  \"stake_amount\": 150,\n  \"bet_metadata\": {\n    \"updated_reason\": \"odds_change\",\n    \"previous_odds\": \"90\"\n  }\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/update/{{bet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "update", "{{bet_id}}"]
+            },
+            "description": "Update a pending match bet (only allowed for PENDING bets)"
+          }
+        },
+        {
+          "name": "Settle Bet - Won",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isWon\": true,\n  \"result\": \"India won by 7 wickets\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/settle/{{bet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "settle", "{{bet_id}}"]
+            },
+            "description": "Settle a bet as won"
+          }
+        },
+        {
+          "name": "Settle Bet - Lost",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "Authorization",
+                "value": "Bearer {{auth_token}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"isWon\": false,\n  \"result\": \"Australia won by 5 runs\"\n}"
+            },
+            "url": {
+              "raw": "{{base_url}}/api/v1/match-bets/settle/{{bet_id}}",
+              "host": ["{{base_url}}"],
+              "path": ["api", "v1", "match-bets", "settle", "{{bet_id}}"]
+            },
+            "description": "Settle a bet as lost"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:3000",
+      "description": "Base URL for the API"
+    },
+    {
+      "key": "auth_token",
+      "value": "",
+      "description": "JWT authentication token"
+    },
+    {
+      "key": "user_id",
+      "value": "",
+      "description": "User ID for betting"
+    },
+    {
+      "key": "match_id",
+      "value": "",
+      "description": "Match ID for betting"
+    },
+    {
+      "key": "bet_id",
+      "value": "",
+      "description": "Bet ID for operations"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+version: '3.7'
+
+services:
+
+  server:
+    build:
+      context: ./
+      target: development-build-stage
+      dockerfile: Dockerfile
+    container_name: cricket_server
+    environment:
+      - TZ=Asia/Kolkata
+    ports:
+      - '8778:2552'
+    volumes:
+      - ./:/app
+      - /app/node_modules
+    restart: always
+    deploy:
+      # resources:
+      #   limits:
+      #     cpus: '4'
+      #     memory: 4G
+    # networks:
+    #   myipvlan:
+    #     ipv4_address: 192.168.0.6
+
+# networks:
+#   myipvlan:
+#     external: true
+#     name: br0
+
+volumes:
+  data:
+    driver: local

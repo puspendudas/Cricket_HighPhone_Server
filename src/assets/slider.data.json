@@ -1,0 +1,38 @@
+[
+    {
+        "_id": "66cb7ae6e8ffe7f4f26cf176",
+        "tag": "app_slider",
+        "state": true,
+        "link": "74efaa8a-fc9c-4f45-a439-0b14b4f62a4e.jpeg",
+        "createdAt": "2024-08-25T18:41:42.503Z",
+        "updatedAt": "2024-08-25T18:41:42.503Z",
+        "__v": 0
+    },
+    {
+        "_id": "66cb7af0e8ffe7f4f26cf17b",
+        "tag": "app_slider",
+        "state": true,
+        "link": "fcc01764-0ec2-44c9-ad39-f223d60e97b0.jpeg",
+        "createdAt": "2024-08-25T18:41:52.061Z",
+        "updatedAt": "2024-08-25T18:41:52.061Z",
+        "__v": 0
+    },
+    {
+        "_id": "66cb7afae8ffe7f4f26cf180",
+        "tag": "app_slider",
+        "state": true,
+        "link": "c1ba29a5-726f-4089-9137-16ac5a1a1f9f.jpeg",
+        "createdAt": "2024-08-25T18:42:02.246Z",
+        "updatedAt": "2024-08-25T18:42:02.246Z",
+        "__v": 0
+    },
+    {
+        "_id": "66cb7b1ce8ffe7f4f26cf185",
+        "tag": "app_slider",
+        "state": true,
+        "link": "2a612460-759f-4edd-94ea-f67ee5a8abf0.jpeg",
+        "createdAt": "2024-08-25T18:42:36.203Z",
+        "updatedAt": "2024-08-25T18:42:36.203Z",
+        "__v": 0
+    }
+]
