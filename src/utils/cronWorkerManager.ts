@@ -33,19 +33,19 @@ class CronWorkerManager {
 
     try {
       // Create worker thread with better error handling
-      
+
       // Try both .ts and .js files
       let workerPath = path.join(__dirname, '../workers/cronWorker.ts');
       if (!fs.existsSync(workerPath)) {
         workerPath = path.join(__dirname, '../workers/cronWorker.js');
         logger.info(`CronWorkerManager: .ts file not found, trying .js file`);
       }
-      
+
       logger.info(`CronWorkerManager: Starting worker at path: ${workerPath}`);
       logger.info(`CronWorkerManager: Current directory: ${__dirname}`);
       logger.info(`CronWorkerManager: Node version: ${process.version}`);
       logger.info(`CronWorkerManager: Worker file exists: ${fs.existsSync(workerPath)}`);
-      
+
       this.worker = new Worker(workerPath, {
         execArgv: [
           '--require', 'ts-node/register',
@@ -84,7 +84,7 @@ class CronWorkerManager {
 
       // Wait for worker to be ready with a proper timeout
       await this.waitForWorkerReady();
-      
+
       this.isInitialized = true;
       logger.info('CronWorkerManager: Worker thread initialized successfully');
     } catch (error) {
@@ -113,7 +113,7 @@ class CronWorkerManager {
             logger.info('CronWorkerManager: Worker is online, attempting ping...');
             resolve();
           });
-          
+
           this.worker.once('error', (error) => {
             clearTimeout(timeout);
             reject(error);
@@ -123,10 +123,10 @@ class CronWorkerManager {
           reject(new Error('Worker is null'));
         }
       });
-      
+
       // Give the worker more time to set up message handlers and initialize
       await new Promise(resolve => setTimeout(resolve, 3000));
-      
+
       // Now try to ping the worker to ensure it's ready (increased timeout for database connection)
       await this.sendMessage('PING', null, 30000);
       logger.info('CronWorkerManager: Worker is ready and responding');
@@ -192,7 +192,7 @@ class CronWorkerManager {
       pendingMessage.reject(error);
     }
     this.pendingMessages.clear();
-    
+
     this.cleanup();
   }
 
@@ -203,7 +203,7 @@ class CronWorkerManager {
     if (!this.worker) {
       throw new Error('Worker not available');
     }
-    
+
     // Allow PING messages during initialization
     if (!this.isInitialized && type !== 'PING') {
       throw new Error('Worker not initialized');
@@ -238,7 +238,7 @@ class CronWorkerManager {
       logger.warn('CronWorkerManager: Running in fallback mode - match cron job disabled');
       return;
     }
-    
+
     try {
       const result = await this.sendMessage('START_MATCH_CRON');
       logger.info('CronWorkerManager: Match cron job started successfully');
@@ -257,7 +257,7 @@ class CronWorkerManager {
       logger.warn('CronWorkerManager: Running in fallback mode - match cron job already disabled');
       return;
     }
-    
+
     try {
       const result = await this.sendMessage('STOP_MATCH_CRON');
       logger.info('CronWorkerManager: Match cron job stopped successfully');
@@ -268,98 +268,21 @@ class CronWorkerManager {
     }
   }
 
-  /**
-   * Start admin cron job in worker thread
-   */
-  public async startAdminCronJob(): Promise<void> {
-    if (this.fallbackMode) {
-      logger.warn('CronWorkerManager: Running in fallback mode - admin cron job disabled');
-      return;
-    }
-    
-    try {
-      const result = await this.sendMessage('START_ADMIN_CRON');
-      logger.info('CronWorkerManager: Admin cron job started successfully');
-      return result;
-    } catch (error) {
-      logger.error('CronWorkerManager: Failed to start admin cron job:', error);
-      throw error;
-    }
-  }
+
 
   /**
-   * Start auto declare in worker thread
-   */
-  public async startAutoDeclare(): Promise<void> {
-    if (this.fallbackMode) {
-      logger.warn('CronWorkerManager: Running in fallback mode - auto declare disabled');
-      return;
-    }
-    
-    try {
-      const result = await this.sendMessage('START_AUTO_DECLARE');
-      logger.info('CronWorkerManager: Auto declare started successfully');
-      return result;
-    } catch (error) {
-      logger.error('CronWorkerManager: Failed to start auto declare:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Stop auto declare in worker thread
-   */
-  public async stopAutoDeclare(): Promise<void> {
-    if (this.fallbackMode) {
-      logger.warn('CronWorkerManager: Running in fallback mode - auto declare already disabled');
-      return;
-    }
-    
-    try {
-      const result = await this.sendMessage('STOP_AUTO_DECLARE');
-      logger.info('CronWorkerManager: Auto declare stopped successfully');
-      return result;
-    } catch (error) {
-      logger.error('CronWorkerManager: Failed to stop auto declare:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Start daily API status check in worker thread
-   */
-  public async startAPIStatusCheck(): Promise<void> {
-    if (this.fallbackMode) {
-      logger.warn('CronWorkerManager: Running in fallback mode - API status check disabled');
-      return;
-    }
-    
-    try {
-      const result = await this.sendMessage('START_API_STATUS_CHECK');
-      logger.info('CronWorkerManager: API status check started successfully');
-      return result;
-    } catch (error) {
-      logger.error('CronWorkerManager: Failed to start API status check:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Get status of all cron jobs from worker thread
+   * Get status of match cron job from worker thread
    */
   public async getCronJobsStatus(): Promise<any> {
     if (this.fallbackMode) {
       logger.warn('CronWorkerManager: Running in fallback mode - returning disabled status');
       return {
         match: { isRunning: false, schedule: 'Disabled - fallback mode' },
-        admin: { isRunning: false, schedule: 'Disabled - fallback mode' },
-        autoDeclare: { isRunning: false, schedule: 'Disabled - fallback mode' },
-        apiStatusCheck: { isRunning: false, schedule: 'Disabled - fallback mode' },
         timestamp: new Date().toISOString(),
         fallbackMode: true
       };
     }
-    
+
     try {
       const result = await this.sendMessage('GET_CRON_STATUS');
       return result.data;
@@ -369,22 +292,7 @@ class CronWorkerManager {
     }
   }
 
-  /**
-   * Check if auto declare is running
-   */
-  public async isAutoDeclareRunning(): Promise<boolean> {
-    if (this.fallbackMode) {
-      return false;
-    }
-    
-    try {
-      const status = await this.getCronJobsStatus();
-      return status.autoDeclare === 'running';
-    } catch (error) {
-      logger.error('CronWorkerManager: Failed to check auto declare status:', error);
-      return false;
-    }
-  }
+
 
   /**
    * Check if match cron job is running
@@ -393,7 +301,7 @@ class CronWorkerManager {
     if (this.fallbackMode) {
       return false;
     }
-    
+
     try {
       const status = await this.getCronJobsStatus();
       return status.match === 'running';
@@ -408,7 +316,7 @@ class CronWorkerManager {
    */
   private cleanup(): void {
     this.isInitialized = false;
-    
+
     // Clear all pending messages
     for (const [, pendingMessage] of this.pendingMessages) {
       clearTimeout(pendingMessage.timeout);
@@ -429,14 +337,14 @@ class CronWorkerManager {
     try {
       // Send shutdown message to worker
       await this.sendMessage('SHUTDOWN', null, 10000);
-      
+
       // Terminate worker
       await this.worker.terminate();
-      
+
       logger.info('CronWorkerManager: Worker shutdown completed');
     } catch (error) {
       logger.error('CronWorkerManager: Error during shutdown:', error);
-      
+
       // Force terminate if graceful shutdown fails
       if (this.worker) {
         await this.worker.terminate();

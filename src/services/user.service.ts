@@ -52,17 +52,17 @@ class UserService {
           }
         }, { new: true });
 
-        //Update Wallet History
-        await this.walletHistory.create({
-          user_id: agent.id,
-          receiver_id: newUser.id,
-          agent_id: agent.id,
-          amount: userData.wallet,
-          user_type: 'User',
-          type: 'Credit',
-          description: `${newUser.user_name} get ${userData.wallet} from wallet for SignUp From ${agent.user_name}`,
-          status: 'success',
-        });
+      //Update Wallet History
+      await this.walletHistory.create({
+        user_id: agent.id,
+        receiver_id: newUser.id,
+        agent_id: agent.id,
+        amount: userData.wallet,
+        user_type: 'User',
+        type: 'Credit',
+        description: `${newUser.user_name} get ${userData.wallet} from wallet for SignUp From ${agent.user_name}`,
+        status: 'success',
+      });
 
       return newUser;
     } else {
@@ -812,7 +812,7 @@ class UserService {
   public async updateUserLimit(userData: UpdateLimitDto): Promise<User> {
     if (isEmpty(userData)) throw new HttpException(400, 'LimitData is empty');
 
-    const findUser: User | null = await this.users.findById(userData.id).select('agent_id');
+    const findUser: User | null = await this.users.findById(userData.id).select('agent_id wallet');
     if (!findUser) throw new HttpException(409, "User doesn't exist");
 
     const parentAdmin: Admin | null = await this.admin.findById(findUser.agent_id);

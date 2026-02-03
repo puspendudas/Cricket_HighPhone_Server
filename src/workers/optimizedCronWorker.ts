@@ -4,10 +4,9 @@ import { isMainThread, parentPort } from 'worker_threads';
 import * as cron from 'node-cron';
 import { logger } from '../utils/logger';
 import OptimizedMatchService from '@/services/optimizedMatch.service';
-import AdminService from '@/services/admin.service';
-import MarketService from '@/services/market.service';
 import mongoose from 'mongoose';
 import DB from '@/databases';
+
 
 // Debug function for worker thread
 function log(message: string, ...args: any[]) {
@@ -24,8 +23,6 @@ class OptimizedCronWorker {
   private cronJobs: Map<string, cron.ScheduledTask> = new Map();
   private isReady = false;
   private matchService: OptimizedMatchService;
-  private adminService: AdminService;
-  private marketService: MarketService;
   private jobExecutionStatus: Map<string, { isRunning: boolean; lastExecution: number; executionCount: number }> = new Map();
   private performanceMetrics: Map<string, { totalTime: number; executions: number; errors: number }> = new Map();
   private memoryUsageInterval: NodeJS.Timeout | null = null;
@@ -51,28 +48,27 @@ class OptimizedCronWorker {
   private async initializeWorker(): Promise<void> {
     try {
       log('Starting optimized initialization...');
-      
+
       // Setup message handlers first
       this.setupMessageHandlers();
-      
+
       // Establish database connection with retry logic
       await this.establishDatabaseConnection();
-      
+
       // Initialize services
       this.matchService = new OptimizedMatchService();
-      this.adminService = new AdminService();
-      this.marketService = new MarketService();
-      
+
+
       // Initialize job execution tracking
       this.initializeJobTracking();
-      
+
       // Start monitoring
       this.startPerformanceMonitoring();
-      
+
       // Mark as ready
       this.isReady = true;
       log('Optimized worker initialized successfully');
-      
+
       // Send ready signal
       if (parentPort) {
         parentPort.postMessage({ type: 'WORKER_READY' });
@@ -91,25 +87,25 @@ class OptimizedCronWorker {
   private async establishDatabaseConnection(): Promise<void> {
     const maxRetries = 3;
     let retryCount = 0;
-    
+
     while (retryCount < maxRetries) {
       try {
         log(`Attempting database connection (attempt ${retryCount + 1}/${maxRetries})...`);
         await DB();
-        
+
         // Wait for connection to be ready
         await this.waitForDatabaseReady();
-        
+
         log('Database connection established successfully');
         return;
       } catch (error) {
         retryCount++;
         log(`Database connection attempt ${retryCount} failed:`, error);
-        
+
         if (retryCount >= maxRetries) {
           throw new Error(`Failed to establish database connection after ${maxRetries} attempts`);
         }
-        
+
         // Wait before retry
         await new Promise(resolve => setTimeout(resolve, 2000 * retryCount));
       }
@@ -122,7 +118,7 @@ class OptimizedCronWorker {
   private async waitForDatabaseReady(): Promise<void> {
     const timeout = 30000; // 30 seconds
     const start = Date.now();
-    
+
     while (Date.now() - start < timeout) {
       if (mongoose.connection.readyState === 1) {
         log('Database connection is ready');
@@ -130,7 +126,7 @@ class OptimizedCronWorker {
       }
       await new Promise(resolve => setTimeout(resolve, 500));
     }
-    
+
     throw new Error('Database connection timeout');
   }
 
@@ -138,15 +134,15 @@ class OptimizedCronWorker {
    * Initialize job execution tracking
    */
   private initializeJobTracking(): void {
-    const jobs = ['match', 'admin', 'autoDeclare', 'apiStatusCheck'];
-    
+    const jobs = ['match'];
+
     jobs.forEach(job => {
       this.jobExecutionStatus.set(job, {
         isRunning: false,
         lastExecution: 0,
         executionCount: 0
       });
-      
+
       this.performanceMetrics.set(job, {
         totalTime: 0,
         executions: 0,
@@ -163,7 +159,7 @@ class OptimizedCronWorker {
     this.memoryUsageInterval = setInterval(() => {
       this.checkMemoryUsage();
     }, 30000); // Check every 30 seconds
-    
+
     // Database connection health monitoring
     this.connectionHealthInterval = setInterval(() => {
       this.checkConnectionHealth();
@@ -177,19 +173,19 @@ class OptimizedCronWorker {
     const memUsage = process.memoryUsage();
     const heapUsedMB = Math.round(memUsage.heapUsed / 1024 / 1024);
     const rssUsedMB = Math.round(memUsage.rss / 1024 / 1024);
-    
+
     this.lastMemoryCheck = Date.now();
-    
+
     if (heapUsedMB > this.MAX_MEMORY_MB) {
       log(`High memory usage detected: Heap ${heapUsedMB}MB, RSS ${rssUsedMB}MB`);
-      
+
       // Force garbage collection if available
       if (global.gc) {
         global.gc();
         log('Forced garbage collection');
       }
     }
-    
+
     // Log memory stats every 5 minutes
     if (this.lastMemoryCheck % 300000 < 30000) {
       log(`Memory usage: Heap ${heapUsedMB}MB, RSS ${rssUsedMB}MB`);
@@ -202,7 +198,7 @@ class OptimizedCronWorker {
   private checkConnectionHealth(): void {
     const state = mongoose.connection.readyState;
     const stateNames = ['disconnected', 'connected', 'connecting', 'disconnecting'];
-    
+
     if (state !== 1) {
       log(`Database connection unhealthy: ${stateNames[state] || 'unknown'}`);
     }
@@ -214,28 +210,28 @@ class OptimizedCronWorker {
   private async executeJobSafely(jobName: string, jobFunction: () => Promise<void>): Promise<void> {
     const jobStatus = this.jobExecutionStatus.get(jobName);
     const metrics = this.performanceMetrics.get(jobName);
-    
+
     if (!jobStatus || !metrics) {
       log(`Job tracking not initialized for: ${jobName}`);
       return;
     }
-    
+
     // Check if job is already running
     if (jobStatus.isRunning) {
       log(`Skipping ${jobName} - previous execution still running`);
       return;
     }
-    
+
     // Check database connection
     if (mongoose.connection.readyState !== 1) {
       log(`Skipping ${jobName} - database not connected`);
       return;
     }
-    
+
     const startTime = Date.now();
     jobStatus.isRunning = true;
     jobStatus.executionCount++;
-    
+
     try {
       // Set timeout for job execution
       const timeoutPromise = new Promise<never>((_, reject) => {
@@ -243,25 +239,25 @@ class OptimizedCronWorker {
           reject(new Error(`Job ${jobName} timed out after ${this.JOB_TIMEOUT_MS}ms`));
         }, this.JOB_TIMEOUT_MS);
       });
-      
+
       // Race between job execution and timeout
       await Promise.race([jobFunction(), timeoutPromise]);
-      
+
       const executionTime = Date.now() - startTime;
       metrics.totalTime += executionTime;
       metrics.executions++;
-      
+
       jobStatus.lastExecution = Date.now();
-      
+
       // Log slow executions
       if (executionTime > 10000) {
         log(`Slow execution for ${jobName}: ${executionTime}ms`);
       }
-      
+
     } catch (error) {
       metrics.errors++;
       log(`Error in ${jobName} job:`, error);
-      
+
       // Don't throw error to prevent cron job from stopping
     } finally {
       jobStatus.isRunning = false;
@@ -294,26 +290,26 @@ class OptimizedCronWorker {
    */
   private async handleMessage(message: any): Promise<void> {
     const { type, id } = message;
-    
+
     log(`Handling message: ${type}`);
-    
+
     // Handle PING and HEALTH_CHECK messages
     if (type === 'PING' || type === 'HEALTH_CHECK') {
       if (this.isReady) {
-        this.sendResponse(id, { 
-          success: true, 
+        this.sendResponse(id, {
+          success: true,
           message: 'Worker is ready',
           stats: this.getWorkerStats()
         });
       }
       return;
     }
-    
+
     // For other messages, check if worker is ready
     if (!this.isReady) {
-      this.sendResponse(id, { 
-        success: false, 
-        error: 'Worker is still initializing. Please try again.' 
+      this.sendResponse(id, {
+        success: false,
+        error: 'Worker is still initializing. Please try again.'
       });
       return;
     }
@@ -334,15 +330,6 @@ class OptimizedCronWorker {
           this.sendResponse(id, { success: true, message: 'Match cron job stopped successfully' });
         } catch (error) {
           this.sendResponse(id, { success: false, error: `Failed to stop match cron job: ${error.message}` });
-        }
-        break;
-
-      case 'START_ADMIN_CRON':
-        try {
-          await this.startAdminCronJob();
-          this.sendResponse(id, { success: true, message: 'Admin cron job started successfully' });
-        } catch (error) {
-          this.sendResponse(id, { success: false, error: `Failed to start admin cron job: ${error.message}` });
         }
         break;
 
@@ -411,13 +398,13 @@ class OptimizedCronWorker {
       if (this.cronJobs.has('match')) {
         this.cronJobs.get('match')?.stop();
         this.cronJobs.delete('match');
-        
+
         // Reset job status
         const jobStatus = this.jobExecutionStatus.get('match');
         if (jobStatus) {
           jobStatus.isRunning = false;
         }
-        
+
         log('Match cron job stopped successfully');
       }
     } catch (error) {
@@ -426,20 +413,7 @@ class OptimizedCronWorker {
     }
   }
 
-  /**
-   * Start admin cron job
-   */
-  private async startAdminCronJob(): Promise<void> {
-    try {
-      await this.executeJobSafely('admin', async () => {
-        await this.adminService.startCronJob();
-      });
-      log('Admin cron job started successfully');
-    } catch (error) {
-      log('Failed to start admin cron job:', error);
-      throw error;
-    }
-  }
+
 
   /**
    * Get status of all cron jobs with enhanced metrics
@@ -452,12 +426,6 @@ class OptimizedCronWorker {
         executionStatus: this.jobExecutionStatus.get('match'),
         metrics: this.performanceMetrics.get('match')
       },
-      admin: {
-        isRunning: this.cronJobs.has('admin') && this.cronJobs.get('admin')?.getStatus() === 'scheduled',
-        schedule: 'Dynamic based on settings',
-        executionStatus: this.jobExecutionStatus.get('admin'),
-        metrics: this.performanceMetrics.get('admin')
-      },
       timestamp: new Date().toISOString(),
       databaseStatus: {
         readyState: mongoose.connection.readyState,
@@ -467,7 +435,7 @@ class OptimizedCronWorker {
       memoryUsage: process.memoryUsage(),
       uptime: process.uptime()
     };
-    
+
     return status;
   }
 
@@ -487,7 +455,7 @@ class OptimizedCronWorker {
       },
       uptime: process.uptime()
     };
-    
+
     // Add job-specific stats
     for (const [jobName, metrics] of this.performanceMetrics) {
       const executionStatus = this.jobExecutionStatus.get(jobName);
@@ -499,7 +467,7 @@ class OptimizedCronWorker {
         lastExecution: executionStatus?.lastExecution || 0
       };
     }
-    
+
     return stats;
   }
 
@@ -522,7 +490,7 @@ class OptimizedCronWorker {
   private async shutdown(): Promise<void> {
     try {
       log('Shutting down optimized worker...');
-      
+
       // Stop all cron jobs
       for (const [jobName, cronJob] of this.cronJobs) {
         try {
@@ -532,21 +500,21 @@ class OptimizedCronWorker {
           log(`Error stopping cron job ${jobName}:`, error);
         }
       }
-      
+
       // Clear all cron jobs
       this.cronJobs.clear();
-      
+
       // Clear monitoring intervals
       if (this.memoryUsageInterval) {
         clearInterval(this.memoryUsageInterval);
         this.memoryUsageInterval = null;
       }
-      
+
       if (this.connectionHealthInterval) {
         clearInterval(this.connectionHealthInterval);
         this.connectionHealthInterval = null;
       }
-      
+
       // Close database connection
       try {
         await mongoose.connection.close();
@@ -554,7 +522,7 @@ class OptimizedCronWorker {
       } catch (error) {
         log('Error closing database connection:', error);
       }
-      
+
       log('Optimized worker shutdown complete');
     } catch (error) {
       log(`Error during shutdown: ${(error as Error).message}`);

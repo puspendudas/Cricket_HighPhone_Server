@@ -4,11 +4,8 @@ import { isMainThread, parentPort } from 'worker_threads';
 import * as cron from 'node-cron';
 import { logger } from '../utils/logger';
 import MatchService from '../services/match.service';
-import AdminService from '../services/admin.service';
-import MarketService from '../services/market.service';
-import axios from 'axios';
-import { v4 as uuidv4 } from 'uuid';
 import DB from '../databases';
+
 
 // Debug function for worker thread
 function log(message: string, ...args: any[]) {
@@ -23,11 +20,9 @@ log('Worker file loaded');
  */
 class CronWorker {
   private cronJobs: Map<string, cron.ScheduledTask> = new Map();
-  private intervalId: NodeJS.Timeout | null = null;
   private isReady = false;
   private matchService: MatchService;
-  private adminService: AdminService;
-  private marketService: MarketService;
+
 
   constructor() {
     log('Starting constructor...');
@@ -61,8 +56,7 @@ class CronWorker {
 
       // Initialize services
       this.matchService = new MatchService();
-      this.adminService = new AdminService();
-      this.marketService = new MarketService();
+
 
       // Mark as ready after everything is initialized
       this.isReady = true;
@@ -153,42 +147,6 @@ class CronWorker {
         }
         break;
 
-      case 'START_ADMIN_CRON':
-        try {
-          await this.startAdminCronJob();
-          this.sendResponse(id, { success: true, message: 'Admin cron job started successfully' });
-        } catch (error) {
-          this.sendResponse(id, { success: false, message: `Failed to start admin cron job: ${error.message}` });
-        }
-        break;
-
-      case 'START_AUTO_DECLARE':
-        try {
-          await this.startAutoDeclareJob();
-          this.sendResponse(id, { success: true, message: 'Auto declare started successfully' });
-        } catch (error) {
-          this.sendResponse(id, { success: false, message: `Failed to start auto declare: ${error.message}` });
-        }
-        break;
-
-      case 'STOP_AUTO_DECLARE':
-        try {
-          this.stopAutoDeclareJob();
-          this.sendResponse(id, { success: true, message: 'Auto declare stopped successfully' });
-        } catch (error) {
-          this.sendResponse(id, { success: false, message: `Failed to stop auto declare: ${error.message}` });
-        }
-        break;
-
-      case 'START_API_STATUS_CHECK':
-        try {
-          await this.startAPIStatusCheckJob();
-          this.sendResponse(id, { success: true, message: 'API status check started successfully' });
-        } catch (error) {
-          this.sendResponse(id, { success: false, message: `Failed to start API status check: ${error.message}` });
-        }
-        break;
-
       case 'GET_CRON_STATUS':
         const status = this.getCronJobsStatus();
         this.sendResponse(id, { success: true, data: status });
@@ -222,18 +180,6 @@ class CronWorker {
       match: {
         isRunning: this.cronJobs.has('match') && this.cronJobs.get('match')?.getStatus() === 'scheduled',
         schedule: '* * * * * *' // Every second
-      },
-      admin: {
-        isRunning: this.cronJobs.has('admin') && this.cronJobs.get('admin')?.getStatus() === 'scheduled',
-        schedule: 'Dynamic based on settings'
-      },
-      autoDeclare: {
-        isRunning: this.cronJobs.has('autoDeclare') && this.cronJobs.get('autoDeclare')?.getStatus() === 'scheduled',
-        schedule: '0 */30 * * * *' // Every 30 minutes
-      },
-      apiStatusCheck: {
-        isRunning: this.cronJobs.has('apiStatusCheck') && this.cronJobs.get('apiStatusCheck')?.getStatus() === 'scheduled',
-        schedule: '0 0 * * *' // Daily at midnight
       },
       timestamp: new Date().toISOString()
     };
@@ -284,133 +230,7 @@ class CronWorker {
     }
   }
 
-  /**
-   * Start admin cron job
-   */
-  private async startAdminCronJob(): Promise<void> {
-    try {
-      // Stop existing admin cron job if running
-      if (this.cronJobs.has('admin')) {
-        this.cronJobs.get('admin')?.stop();
-        this.cronJobs.delete('admin');
-      }
 
-      // Start admin cron job
-      await this.adminService.startCronJob();
-      log('Admin cron job started successfully');
-    } catch (error) {
-      log('Failed to start admin cron job:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Start auto declare job
-   */
-  private async startAutoDeclareJob(): Promise<void> {
-    try {
-      // Stop existing auto declare job if running
-      if (this.cronJobs.has('autoDeclare')) {
-        this.cronJobs.get('autoDeclare')?.stop();
-        this.cronJobs.delete('autoDeclare');
-      }
-
-      // Start auto declare job - runs every 30 minutes
-      const autoDeclareJob = cron.schedule('0 */30 * * * *', async () => {
-        try {
-          await this.marketService.autoDeclare();
-          log('Auto declare executed successfully');
-        } catch (error) {
-          log('Error in auto declare job:', error);
-        }
-      });
-
-      this.cronJobs.set('autoDeclare', autoDeclareJob);
-      autoDeclareJob.start();
-      log('Auto declare job started successfully');
-    } catch (error) {
-      log('Failed to start auto declare job:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Stop auto declare job
-   */
-  private stopAutoDeclareJob(): void {
-    try {
-      if (this.cronJobs.has('autoDeclare')) {
-        this.cronJobs.get('autoDeclare')?.stop();
-        this.cronJobs.delete('autoDeclare');
-        log('Auto declare job stopped successfully');
-      }
-    } catch (error) {
-      log('Failed to stop auto declare job:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Start API status check job
-   */
-  private async startAPIStatusCheckJob(): Promise<void> {
-    try {
-      // Stop existing API status check job if running
-      if (this.cronJobs.has('apiStatusCheck')) {
-        this.cronJobs.get('apiStatusCheck')?.stop();
-        this.cronJobs.delete('apiStatusCheck');
-      }
-
-      // Start API status check job - runs daily at midnight
-      const apiStatusCheckJob = cron.schedule('0 0 * * *', async () => {
-        try {
-          await this.checkAPIStatus();
-          log('API status check executed successfully');
-        } catch (error) {
-          log('Error in API status check job:', error);
-        }
-      });
-
-      this.cronJobs.set('apiStatusCheck', apiStatusCheckJob);
-      apiStatusCheckJob.start();
-      log('API status check job started successfully');
-    } catch (error) {
-      log('Failed to start API status check job:', error);
-      throw error;
-    }
-  }
-
-  /**
-   * Check API status
-   */
-  private async checkAPIStatus(): Promise<void> {
-    try {
-      const currentDate = new Date().toISOString().split('T')[0];
-      const randomNumber = uuidv4();
-
-      const body = {
-        date: currentDate,
-        random: randomNumber
-      };
-
-      const response = await axios.post('https://terminal.hpterminal.com/cricket/status', body, {
-        timeout: 10000,
-        headers: {
-          'Content-Type': 'application/json',
-          'User-Agent': 'CricketApp/1.0'
-        }
-      });
-
-      if (response.status === 201) {
-        log('API status check passed - API is working');
-      } else {
-        log('API status check failed - unexpected response status:', response.status);
-      }
-    } catch (error) {
-      log('API status check failed:', error);
-      throw error;
-    }
-  }
 
   /**
    * Shutdown worker and cleanup resources
