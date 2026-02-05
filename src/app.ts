@@ -12,6 +12,7 @@ import errorMiddleware from '@middlewares/error.middleware';
 
 import MarketService from './services/market.service';
 import CronWorkerManager from '@utils/cronWorkerManager';
+import AutoDeclareWorkerManager from '@utils/autoDeclareWorkerManager';
 // Child process middleware removed for performance optimization
 import { Routes } from '@interfaces/routes.interface';
 import DB from '@/databases';
@@ -23,12 +24,15 @@ class App {
   public env: string;
   public port: string | number;
   private cronWorkerManager: CronWorkerManager;
+  private autoDeclareWorkerManager: AutoDeclareWorkerManager;
+  private intervalId?: NodeJS.Timeout;
 
   constructor(routes: Routes[]) {
     this.app = express();
     this.env = NODE_ENV || 'development';
     this.port = PORT || 3000;
     this.cronWorkerManager = new CronWorkerManager();
+    this.autoDeclareWorkerManager = new AutoDeclareWorkerManager();
 
     this.connectToDatabase();
     this.initializeMiddlewares();
@@ -43,6 +47,10 @@ class App {
       logger.info('Initializing CronWorkerManager...');
       await this.cronWorkerManager.initialize();
       logger.info('CronWorkerManager initialized successfully');
+
+      logger.info('Initializing AutoDeclareWorkerManager...');
+      await this.autoDeclareWorkerManager.initialize();
+      logger.info('AutoDeclareWorkerManager initialized successfully');
 
       this.app.listen(this.port, () => {
         logger.info(`===================================`);
@@ -73,6 +81,10 @@ class App {
       logger.info('Starting match cron job...');
       await this.cronWorkerManager.startMatchCronJob();
       logger.info('Match cron job started successfully');
+
+      logger.info('Starting auto declare cron job...');
+      await this.autoDeclareWorkerManager.startAutoDeclareCronJob();
+      logger.info('Auto declare cron job started successfully');
     } catch (error) {
       logger.error('Failed to start cron jobs:', error);
       logger.error('Cron job error details:', error.message);
@@ -89,6 +101,7 @@ class App {
     try {
       // Shutdown worker thread and all cron jobs
       await this.cronWorkerManager.shutdown();
+      await this.autoDeclareWorkerManager.shutdown();
       logger.info('Worker thread shutdown complete');
     } catch (error) {
       logger.error('Error during worker shutdown:', error);

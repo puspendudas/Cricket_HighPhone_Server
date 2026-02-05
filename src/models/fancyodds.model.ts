@@ -24,6 +24,7 @@ const fancyOddsSchema = new Schema<FancyOddsDocument>(
         isActive: { type: Boolean, required: true, default: false, select: true },
         isEnabled: { type: Boolean, required: true, default: false, select: true },
         isDeclared: { type: Boolean, required: true, default: false, select: true },
+        isAuto: { type: Boolean, required: true, default: false, select: true },
         isFancyEnded: { type: Boolean, required: false, default: false, select: true },
         resultScore: { type: String, required: false, default: null, select: true },
     },

@@ -23,6 +23,7 @@ interface FancyOdds {
     isActive: boolean;
     isEnabled: boolean;
     isDeclared: boolean;
+    isAuto: boolean;
     isFancyEnded: boolean;
     resultScore: string;
 }
