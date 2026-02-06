@@ -136,8 +136,8 @@ class App {
     // this.app.use(cors({ origin: [ORIGIN_LOCAL, ORIGIN_CRICKET, ORIGIN_LIVE, ORIGIN_SATTA, ORIGIN_LOCAL_1, ORIGIN_LOCAL_2, ORIGIN_SATTA_1, ORIGIN_LIVE_1, ORIGIN_ANDROID_APP, ORIGIN_IOS_APP], optionsSuccessStatus: 200, credentials: CREDENTIALS }));
     this.app.use(cors({
       origin: [
-        'https://cricket.highphone11.com',
-        'https://highphone11.com',
+        'https://testingexch.com',
+        'https://cricket.testingexch.com',
         'localhost:3000',
         'http://localhost:3000',
         'localhost:3030',
