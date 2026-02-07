@@ -23,12 +23,15 @@ const adminMiddleware = async (req: RequestWithUser, res: Response, next: NextFu
         req.admin = findAdmin;
         next();
       } else {
+        console.warn('[admin.middleware] Token verified but admin not found', { adminId, path: req.originalUrl });
         next(new HttpException(401, 'Wrong authentication token'));
       }
     } else {
+      console.warn('[admin.middleware] Missing token', { path: req.originalUrl });
       next(new HttpException(404, 'Authentication token missing'));
     }
   } catch (error) {
+    console.warn('[admin.middleware] Token verification failed', { path: req.originalUrl, error: error?.message || error });
     next(new HttpException(401, 'Wrong authentication token Error'));
   }
 };

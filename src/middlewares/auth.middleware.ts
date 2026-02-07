@@ -23,12 +23,15 @@ const authMiddleware = async (req: RequestWithUser, res: Response, next: NextFun
         req.user = findUser;
         next();
       } else {
+        console.warn('[auth.middleware] Token verified but user not found', { userId, path: req.originalUrl });
         next(new HttpException(401, 'Wrong authentication token'));
       }
     } else {
+      console.warn('[auth.middleware] Missing token', { path: req.originalUrl });
       next(new HttpException(404, 'Authentication token missing'));
     }
   } catch (error) {
+    console.warn('[auth.middleware] Token verification failed', { path: req.originalUrl, error: error?.message || error });
     next(new HttpException(440, 'Wrong authentication token Error'));
   }
 };
