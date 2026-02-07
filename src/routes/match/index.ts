@@ -38,7 +38,7 @@ class MatchRoute implements Routes {
         this.router.get(`${this.path}/all`, authMiddleware, this.matchController.getAllMatches);
         this.router.get(`${this.path}/:matchId`, authMiddleware, this.matchController.getUndeclaredMatchById);
         this.router.get(`${this.path}/:matchId/all`, authMiddleware, this.matchController.getAllMatchById);
-        this.router.get(`${this.path}/all/:status`, authMiddleware, this.matchController.getAllMatchesByStatus);
+        this.router.get(`${this.path}/all/:status`, adminOrUserMiddleware, this.matchController.getAllMatchesByStatus);
         this.router.get(`${this.path}/all/declared/:status/:userId`, authMiddleware, this.matchController.getAllMatchesByDeclaredStatus);
 
         // admin routes (full access)
