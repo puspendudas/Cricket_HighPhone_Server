@@ -4,7 +4,6 @@ import { Admin } from '@interfaces/admin.interface';
 
 export interface DataStoredInToken {
   id: string;
-  sessionToken?: string;
 }
 
 export interface TokenData {

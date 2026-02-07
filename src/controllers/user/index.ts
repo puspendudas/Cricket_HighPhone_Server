@@ -34,20 +34,6 @@ class UsersController {
     }
   };
 
-  public getMe = async (req: RequestWithUser, res: Response, next: NextFunction) => {
-    try {
-      const userId = req.user?.id || req.user?._id?.toString();
-      if (!userId) {
-        return res.status(401).json({ status: 'error', message: 'User not authenticated' });
-      }
-
-      const findOneUserData: User = await this.userServices.findUserById(userId);
-      res.status(200).json({ status: 'success', data: findOneUserData });
-    } catch (error) {
-      next(error);
-    }
-  };
-
   public createUser = async (req: Request, res: Response, next: NextFunction) => {
     try {
       const userData: CreateClientDto = req.body;

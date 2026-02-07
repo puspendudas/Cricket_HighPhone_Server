@@ -325,9 +325,6 @@ class MatchService {
     try {
       if (!userId) throw new Error("userId is required");
       const userObjectId = new ObjectId(userId);
-      const userLocks = await this.user.findById(userObjectId).select('+bm_lock +fancy_lock').lean();
-      const lockedBmMatches = new Set((userLocks?.bm_lock || []).map((id: any) => id.toString()));
-      const lockedFancyMatches = new Set((userLocks?.fancy_lock || []).map((id: any) => id.toString()));
 
       const matches = await this.match.aggregate([
         {
@@ -384,11 +381,7 @@ class MatchService {
           }
         }
       ]);
-      return matches.map((match: any) => ({
-        ...match,
-        bm_lock_status: !lockedBmMatches.has(match._id.toString()),
-        fancy_lock_status: !lockedFancyMatches.has(match._id.toString())
-      }));
+      return matches;
     } catch (error: any) {
       throw new Error(
         `Failed to get all matches with bets and user info: ${error.message}`
@@ -396,88 +389,6 @@ class MatchService {
     }
   }
 
-  public async getDeclaredMatchWithUserBetsById(userId: string, matchId: string): Promise<any | null> {
-    try {
-      if (!userId) throw new Error("userId is required");
-      if (!matchId) throw new Error("matchId is required");
-      const userObjectId = new ObjectId(userId);
-      const matchObjectId = new ObjectId(matchId);
-      const userLocks = await this.user.findById(userObjectId).select('+bm_lock +fancy_lock').lean();
-      const lockedBmMatches = new Set((userLocks?.bm_lock || []).map((id: any) => id.toString()));
-      const lockedFancyMatches = new Set((userLocks?.fancy_lock || []).map((id: any) => id.toString()));
-
-      const matches = await this.match.aggregate([
-        {
-          $match: { _id: matchObjectId }
-        },
-        {
-          $lookup: {
-            from: "matchbets",
-            let: { matchId: "$_id" },
-            pipeline: [
-              {
-                $match: {
-                  $expr: { $eq: ["$match_id", "$$matchId"] },
-                  user_id: userObjectId,
-                  status: { $in: ["LOST", "WON"] },
-                  result: { $ne: null }
-                }
-              }
-            ],
-            as: "matchBets"
-          }
-        },
-        {
-          $match: {
-            "matchBets.0": { $exists: true }
-          }
-        },
-        {
-          $lookup: {
-            from: "users",
-            let: { uid: userObjectId },
-            pipeline: [
-              {
-                $match: { $expr: { $eq: ["$_id", "$$uid"] } }
-              },
-              {
-                $project: {
-                  user_name: 1,
-                  name: 1,
-                  wallet: 1,
-                  exposure: 1,
-                  match_commission: 1,
-                  session_commission: 1,
-                  casino_commission: 1
-                }
-              }
-            ],
-            as: "user"
-          }
-        },
-        { $unwind: { path: "$user", preserveNullAndEmptyArrays: true } },
-        {
-          $project: {
-            matchOdds: 0,
-            bookMakerOdds: 0,
-            otherMarketOdds: 0
-          }
-        },
-        { $limit: 1 }
-      ]);
-
-      if (!matches[0]) {
-        return null;
-      }
-      return {
-        ...matches[0],
-        bm_lock_status: !lockedBmMatches.has(matchObjectId.toString()),
-        fancy_lock_status: !lockedFancyMatches.has(matchObjectId.toString())
-      };
-    } catch (error: any) {
-      throw new Error(`Failed to get declared match with user bets: ${error.message}`);
-    }
-  }
 
   public async getAllMatchesWithBetsAndAdminByTotal(
     adminId: string,

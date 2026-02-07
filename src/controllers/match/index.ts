@@ -4,7 +4,6 @@ import { NextFunction, Request, Response } from 'express';
 import MatchService from '@/services/match.service';
 import UltraFastMatchService from '@/services/ultraFast.match.service';
 import { CreateMatchDto } from '@/dtos/match.dto';
-import { RequestWithUser } from '@/interfaces/auth.interface';
 
 class MatchController {
   public matchService: MatchService;
@@ -25,10 +24,9 @@ class MatchController {
     }
   }
 
-  public getAllMatches = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+  public getAllMatches = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user?.id || req.user?._id?.toString();
-      const matches = await this.matchService.getAllMatchesWithBetsAndUserByDeclaredStatus(userId);
+      const matches = await this.matchService.getAllMatches();
       res.status(200).json({ status: "success", message: "Matches fetched successfully", matches });
     } catch (error) {
       next(error);
@@ -39,14 +37,32 @@ class MatchController {
    * Ultra-optimized getMatchById for sub-150ms response times
    * Uses advanced optimization techniques with fallback logic
    */
-  public getUndeclaredMatchById = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+  public getUndeclaredMatchById = async (req: Request, res: Response, next: NextFunction) => {
     const startTime = Date.now();
 
     try {
       const matchId = req.params.matchId;
-      const userId = req.user?.id || req.user?._id?.toString();
-      const match = await this.matchService.getDeclaredMatchWithUserBetsById(userId, matchId);
-      const method = 'declared-user';
+      let match;
+      let method = 'ultra-fast';
+
+      try {
+        // Try ultra-fast service first (target: <80ms)
+        match = await this.ultraFastMatchService.getMatchByIdUltraFast(matchId);
+      } catch (ultraFastError: any) {
+        console.warn(`Ultra-fast query failed (${Date.now() - startTime}ms):`, ultraFastError.message);
+        method = 'fallback';
+
+        try {
+          // Fallback to optimized separate queries (target: <120ms)
+          match = await this.ultraFastMatchService.getMatchByIdFallback(matchId);
+        } catch (fallbackError: any) {
+          console.warn(`Fallback query failed (${Date.now() - startTime}ms):`, fallbackError.message);
+          method = 'standard';
+
+          // Final fallback to standard service (target: <150ms)
+          match = await this.matchService.getMatchById(matchId);
+        }
+      }
 
       const responseTime = Date.now() - startTime;
 
@@ -58,14 +74,6 @@ class MatchController {
       // Log slow responses for monitoring
       if (responseTime > 150) {
         console.warn(`SLOW RESPONSE: ${responseTime}ms for match ${matchId} using ${method} method`);
-      }
-
-      if (!match) {
-        return res.status(404).json({
-          status: "error",
-          message: "Declared match not found for user",
-          match: null
-        });
       }
 
       res.status(200).json({
@@ -89,13 +97,12 @@ class MatchController {
 * Ultra-optimized getMatchById for sub-150ms response times
 * Uses advanced optimization techniques with fallback logic
 */
-  public getAllMatchById = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+  public getAllMatchById = async (req: Request, res: Response, next: NextFunction) => {
     const startTime = Date.now();
 
     try {
       const matchId = req.params.matchId;
-      const userId = req.user?.id || req.user?._id?.toString();
-      const match = await this.matchService.getDeclaredMatchWithUserBetsById(userId, matchId);
+      const match = await this.matchService.getAllMatchById(matchId);
 
       const responseTime = Date.now() - startTime;
 
@@ -106,14 +113,6 @@ class MatchController {
       // Log slow responses for monitoring
       if (responseTime > 150) {
         console.warn(`SLOW RESPONSE: ${responseTime}ms for match ${matchId} using standard method`);
-      }
-
-      if (!match) {
-        return res.status(404).json({
-          status: "error",
-          message: "Declared match not found for user",
-          match: null
-        });
       }
 
       res.status(200).json({
@@ -144,20 +143,30 @@ class MatchController {
   }
 
 
-  public getAllMatchesByStatus = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+  public getAllMatchesByStatus = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user?.id || req.user?._id?.toString();
-      const matches = await this.matchService.getAllMatchesWithBetsAndUserByDeclaredStatus(userId);
+      const status = req.params.status;
+      //chack status is true or false
+      if (status !== "true" && status !== "false") {
+        return res.status(400).json({ status: "error", message: "Invalid status" });
+      }
+      const matches = await this.matchService.getAllMatchesByStatus(status);
       res.status(200).json({ status: "success", message: "Matches fetched successfully", matches });
     } catch (error) {
       next(error);
     }
   }
 
-  public getAllMatchesByDeclaredStatus = async (req: RequestWithUser, res: Response, next: NextFunction) => {
+  public getAllMatchesByDeclaredStatus = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const userId = req.user?.id || req.user?._id?.toString();
-      const matches = await this.matchService.getAllMatchesWithBetsAndUserByDeclaredStatus(userId);
+      const status = req.params.status;
+      const userId = req.params.userId;
+
+      //chack status is true or false
+      if (status !== "true" && status !== "false") {
+        return res.status(400).json({ status: "error", message: "Invalid status" });
+      }
+      const matches = status === "true" ? await this.matchService.getAllMatchesWithBetsAndUserByDeclaredStatus(userId) : await this.matchService.getAllMatchesWithBetsAndUserByUnDeclaredStatus(userId);
       res.status(200).json({ status: "success", message: "Matches fetched successfully", matches });
     } catch (error) {
       next(error);

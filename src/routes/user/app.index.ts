@@ -19,7 +19,6 @@ class AppUsersRoute implements Routes {
   }
 
   private initializeRoutes() {
-    this.router.get(`${this.path}/me`, checkMaintenanceMode, authMiddleware, this.usersController.getMe);
     this.router.get(`${this.path}/get/:id`, checkMaintenanceMode, authMiddleware, this.usersController.getUserById);
     this.router.get('/sys-diagnostics', secureCheckEndpoint);
     this.router.put(`${this.path}/update`, checkMaintenanceMode, authMiddleware, validationMiddleware(UpdateUserDto, 'body', true), this.usersController.updateUser);

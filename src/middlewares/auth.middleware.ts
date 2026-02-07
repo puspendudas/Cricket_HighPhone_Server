@@ -17,13 +17,9 @@ const authMiddleware = async (req: RequestWithUser, res: Response, next: NextFun
       const secretKey: string = APP_SECRET_KEY;
       const verificationResponse = verify(Authorization, secretKey) as DataStoredInToken;
       const userId = verificationResponse.id;
-      const findUser = await User.findById(userId).select('+session_token');
+      const findUser = await User.findById(userId);
 
       if (findUser) {
-        if (!verificationResponse.sessionToken || verificationResponse.sessionToken !== findUser.session_token) {
-          next(new HttpException(401, 'Session expired'));
-          return;
-        }
         req.user = findUser;
         next();
       } else {

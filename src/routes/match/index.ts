@@ -34,18 +34,16 @@ class MatchRoute implements Routes {
 
     // ROUTES FOR MATCHES
     private initializeRoutes() {
-        // user routes (declared matches only, with user bets)
-        this.router.get(`${this.path}/all`, authMiddleware, this.matchController.getAllMatches);
-        this.router.get(`${this.path}/:matchId`, authMiddleware, this.matchController.getUndeclaredMatchById);
-        this.router.get(`${this.path}/:matchId/all`, authMiddleware, this.matchController.getAllMatchById);
+        // these routes are for admin and user both
+        this.router.get(`${this.path}/all`, adminOrUserMiddleware, this.matchController.getAllMatches);
+        this.router.get(`${this.path}/:matchId`, adminOrUserMiddleware, this.matchController.getUndeclaredMatchById);
+        this.router.get(`${this.path}/:matchId/all`, adminOrUserMiddleware, this.matchController.getAllMatchById);
         this.router.get(`${this.path}/all/:status`, adminOrUserMiddleware, this.matchController.getAllMatchesByStatus);
-        this.router.get(`${this.path}/all/declared/:status/:userId`, authMiddleware, this.matchController.getAllMatchesByDeclaredStatus);
-
-        // admin routes (full access)
-        this.router.get(`${this.path}/admin/all/declared/:status/:adminId/:matchId`, adminMiddleware, this.matchController.getAdminAllMatchesByDeclaredStatus);
-        this.router.get(`${this.path}/admin/exposure/:adminId/:matchId`, adminMiddleware, this.matchController.getAdminExposureMatchesByDeclaredStatus);
-        this.router.get(`${this.path}/admin/all/total/:adminId`, adminMiddleware, this.matchController.getAdminAllMatchesByTotal);
-        this.router.post(`${this.path}/create`, adminMiddleware, validationMiddleware(CreateMatchDto, 'body'), this.matchController.createMatch);
+        this.router.get(`${this.path}/all/declared/:status/:userId`, adminOrUserMiddleware, this.matchController.getAllMatchesByDeclaredStatus);
+        this.router.get(`${this.path}/admin/all/declared/:status/:adminId/:matchId`, adminOrUserMiddleware, this.matchController.getAdminAllMatchesByDeclaredStatus);
+        this.router.get(`${this.path}/admin/exposure/:adminId/:matchId`, adminOrUserMiddleware, this.matchController.getAdminExposureMatchesByDeclaredStatus);
+        this.router.get(`${this.path}/admin/all/total/:adminId`, adminOrUserMiddleware, this.matchController.getAdminAllMatchesByTotal);
+        this.router.post(`${this.path}/create`, adminOrUserMiddleware, validationMiddleware(CreateMatchDto, 'body'), this.matchController.createMatch);
         this.router.patch(`${this.path}/toggle/:id`, adminMiddleware, this.matchController.toggleMatch);
         this.router.patch(`${this.path}/session/limit`, adminMiddleware, validationMiddleware(UpdateMatchMinMaxDto, 'body'), this.matchController.updateMatchSessionMinMaxLimit);
         this.router.get(`${this.path}/delay/:id`, adminMiddleware, this.matchController.getMatchBetDelayById);
