@@ -103,8 +103,9 @@ class MatchBetService {
   try {
     if (match.bookMakerOdds && Array.isArray(match.bookMakerOdds)) {
       for (const bookmakerWrapper of match.bookMakerOdds) {
-        for (const bookmaker of Object.values(bookmakerWrapper)) {
-          if (!bookmaker?.oddDatas) continue;
+        for (const value of Object.values(bookmakerWrapper)) {
+          const bookmaker = value as { oddDatas?: any[] };
+          if (!Array.isArray(bookmaker?.oddDatas)) continue;
 
           for (const odds of bookmaker.oddDatas) {
             if (Number(odds.sid) === Number(selectionId)) {
@@ -2904,6 +2905,9 @@ class MatchBetService {
       {
         $set: {
           isDeclared: false,
+          isAuto: false,
+          isActive: true,
+          resultScore: null,
           settledAt: new Date()
         }
       }

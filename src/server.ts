@@ -20,13 +20,14 @@ import MatchRoute from './routes/match/index';
 import MatchBetRoute from './routes/matchBet/index';
 import AdminAnnouncementRoute from './routes/announcement';
 import SettlementRoute from './routes/settlement';
+import AutoDeclareRoute from './routes/autoDeclare';
 
 
 
 validateEnvironment();
 
 const app = new App([new IndexRoute(), new MonitoringRoute(), new AppUsersRoute(), new AdminUsersRoute(), new AuthRoute(), new AdminRoute(), new MiscRoute(), new EnquiryRoute(), new AgentRoute(), new AgentTransactionRoute(),
-new AgentMarketRoute(), new AgentBetRoute(), new MatchRoute(), new MatchBetRoute(), new AdminAnnouncementRoute(), new SettlementRoute()]);
+new AgentMarketRoute(), new AgentBetRoute(), new MatchRoute(), new MatchBetRoute(), new AdminAnnouncementRoute(), new SettlementRoute(), new AutoDeclareRoute()]);
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {
