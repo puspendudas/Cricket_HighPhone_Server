@@ -212,7 +212,12 @@ class AuthService {
       return { cookie: '', tokenData: {} as any, findUser };
     }
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    await this.users.updateOne(
+      { _id: findUser._id },
+      { $set: { session_token: sessionToken, session_updated_at: new Date() } }
+    );
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -234,7 +239,12 @@ class AuthService {
       return { cookie: '', tokenData: {} as any, findUser };
     }
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    await this.users.updateOne(
+      { _id: findUser._id },
+      { $set: { session_token: sessionToken, session_updated_at: new Date() } }
+    );
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -259,7 +269,12 @@ class AuthService {
       return { cookie: '', tokenData: {} as any, findUser };
     }
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    await this.users.updateOne(
+      { _id: findUser._id },
+      { $set: { session_token: sessionToken, session_updated_at: new Date() } }
+    );
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -271,7 +286,12 @@ class AuthService {
     const findUser = await this.users.findOne({ mobile: userData.mobile });
     if (!findUser) throw new HttpException(410, `This mobile ${userData.mobile} was not found`);
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    await this.users.updateOne(
+      { _id: findUser._id },
+      { $set: { session_token: sessionToken, session_updated_at: new Date() } }
+    );
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -307,11 +327,17 @@ class AuthService {
       throw new HttpException(400, 'OTP is expired, please request for new OTP');
     }
     if (userData.otp === findUser.otp) {
-      await this.users.findByIdAndUpdate(findUser.id, { verified: true, otp: "-" })
+      const sessionToken = this.generateSessionToken();
+      await this.users.findByIdAndUpdate(findUser.id, {
+        verified: true,
+        otp: "-",
+        session_token: sessionToken,
+        session_updated_at: new Date()
+      })
       // findUser.verified = true
       // findUser.otp = "-"
       // await findUser.save()
-      const tokenData = this.createToken(findUser);
+      const tokenData = this.createToken(findUser, sessionToken);
       const cookie = this.createCookie(tokenData);
 
       return { cookie, tokenData, findUser };
@@ -351,12 +377,16 @@ class AuthService {
     await foundUser.save();
   }
 
-  public createToken(user: User): TokenData {
-    const dataStoredInToken: DataStoredInToken = { id: user.id };
+  public createToken(user: User, sessionToken?: string): TokenData {
+    const dataStoredInToken: DataStoredInToken = sessionToken ? { id: user.id, sessionToken } : { id: user.id };
     const secretKey: string = APP_SECRET_KEY;
     const expiresIn = "1d";
 
     return { expiresIn, token: sign(dataStoredInToken, secretKey, { expiresIn }) };
+  }
+
+  private generateSessionToken(): string {
+    return randomBytes(32).toString('hex');
   }
 
   public createCookie(tokenData: TokenData): string {

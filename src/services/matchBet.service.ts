@@ -413,7 +413,7 @@ class MatchBetService {
     if (isEmpty(betData)) throw new HttpException(400, 'Bet data is empty');
 
     // Validate user exists and has sufficient balance
-    const user = await this.user.findById(betData.user_id);
+    const user = await this.user.findById(betData.user_id).select('+bm_lock +fancy_lock');
     if (!user) throw new HttpException(404, 'User not found');
 
     if (!user.status) throw new HttpException(404, `User's Bet Locked`);
@@ -437,6 +437,13 @@ class MatchBetService {
 
     if (!match.status) {
       throw new HttpException(400, 'Match is not active for betting');
+    }
+
+    if (betData.bet_type === MatchBetType.BOOKMAKER && user.bm_lock?.some(id => id.toString() === match._id.toString())) {
+      throw new HttpException(403, 'Bookmaker betting is locked for this match');
+    }
+    if (betData.bet_type === MatchBetType.FANCY && user.fancy_lock?.some(id => id.toString() === match._id.toString())) {
+      throw new HttpException(403, 'Fancy betting is locked for this match');
     }
 
     // === delay before updating match ===
