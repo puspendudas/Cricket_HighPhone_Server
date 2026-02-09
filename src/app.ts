@@ -12,7 +12,7 @@ import errorMiddleware from '@middlewares/error.middleware';
 
 import MarketService from './services/market.service';
 import CronWorkerManager from '@utils/cronWorkerManager';
-import AutoDeclareWorkerManager from '@utils/autoDeclareWorkerManager';
+import { autoDeclareWorkerManager } from '@utils/autoDeclareWorkerManager';
 // Child process middleware removed for performance optimization
 import { Routes } from '@interfaces/routes.interface';
 import DB from '@/databases';
@@ -24,7 +24,7 @@ class App {
   public env: string;
   public port: string | number;
   private cronWorkerManager: CronWorkerManager;
-  private autoDeclareWorkerManager: AutoDeclareWorkerManager;
+  private autoDeclareWorkerManager = autoDeclareWorkerManager;
   private intervalId?: NodeJS.Timeout;
 
   constructor(routes: Routes[]) {
@@ -32,7 +32,6 @@ class App {
     this.env = NODE_ENV || 'development';
     this.port = PORT || 3000;
     this.cronWorkerManager = new CronWorkerManager();
-    this.autoDeclareWorkerManager = new AutoDeclareWorkerManager();
 
     this.connectToDatabase();
     this.initializeMiddlewares();

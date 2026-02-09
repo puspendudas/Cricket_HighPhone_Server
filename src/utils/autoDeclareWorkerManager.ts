@@ -209,4 +209,7 @@ class AutoDeclareWorkerManager {
   }
 }
 
+const autoDeclareWorkerManager = new AutoDeclareWorkerManager();
+
+export { autoDeclareWorkerManager };
 export default AutoDeclareWorkerManager;

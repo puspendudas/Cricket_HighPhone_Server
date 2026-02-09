@@ -15,6 +15,8 @@ class AutoDeclareRoute implements Routes {
   private initializeRoutes() {
     this.router.get(`${this.path}/status`, adminMiddleware, this.autoDeclareController.getStatus);
     this.router.post(`${this.path}/run`, adminMiddleware, this.autoDeclareController.runAutoDeclareNow);
+    this.router.post(`${this.path}/start`, adminMiddleware, this.autoDeclareController.startAutoDeclareCron);
+    this.router.post(`${this.path}/stop`, adminMiddleware, this.autoDeclareController.stopAutoDeclareCron);
   }
 }
 

@@ -2906,7 +2906,6 @@ class MatchBetService {
       {
         $set: {
           isDeclared: false,
-          isAuto: false,
           isActive: true,
           resultScore: null,
           settledAt: new Date()
