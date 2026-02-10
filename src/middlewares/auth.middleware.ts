@@ -17,9 +17,15 @@ const authMiddleware = async (req: RequestWithUser, res: Response, next: NextFun
       const secretKey: string = APP_SECRET_KEY;
       const verificationResponse = verify(Authorization, secretKey) as DataStoredInToken;
       const userId = verificationResponse.id;
-      const findUser = await User.findById(userId);
+      const findUser = await User.findById(userId).select('+session_token');
 
       if (findUser) {
+        const tokenSession = verificationResponse.sessionToken;
+        if (!tokenSession || !findUser.session_token || tokenSession !== findUser.session_token) {
+          console.warn('[auth.middleware] Session token mismatch', { userId, path: req.originalUrl });
+          next(new HttpException(401, 'Session expired'));
+          return;
+        }
         req.user = findUser;
         next();
       } else {
