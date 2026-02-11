@@ -2,7 +2,7 @@ import { config } from 'dotenv';
 config({ path: `.env.${process.env.NODE_ENV || 'development'}.local` });
 export const { DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE } = process.env;
 export const CREDENTIALS = process.env.CREDENTIALS === 'true';
-export const DB_URL = `mongodb+srv://${DB_USER}:${DB_PASSWORD}@${DB_HOST}/${DB_DATABASE}`;
+export const DB_URL = process.env.DB_URL || `mongodb+srv://${DB_USER}:${DB_PASSWORD}@${DB_HOST}/${DB_DATABASE}`;
 export const { NODE_ENV, PORT, APP_SECRET_KEY, ADMIN_SECRET_KEY, AGENT_SECRET_KEY, LOG_FORMAT, LOG_DIR, ORIGIN_LOCAL, ORIGIN_CRICKET, ORIGIN_LIVE, ORIGIN_SATTA, ORIGIN_LOCAL_1, ORIGIN_LOCAL_2, ORIGIN_SATTA_1, ORIGIN_LIVE_1, ORIGIN_ANDROID_APP, ORIGIN_IOS_APP } = process.env;
 export const ADMIN_TYPES = ['super_admin', 'admin','super_master', 'master', 'super_agent', 'agent']
 export const GAME_MODES = ["single-digit", "double-digit", "single-panna", "double-panna", "triple-panna", "even-odd-digit", "full-sangum", "half-sangum",

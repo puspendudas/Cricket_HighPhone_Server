@@ -172,7 +172,7 @@ class OptimizedMatchService {
     try {
       // Fetch matches from API with caching
       const response = await this.executeAPIRequest<any>(
-        'https://terminal.hpterminal.com/cricket/matches',
+        'https://data.hpterminal.com/cricket/matches',
         'matches_data'
       );
 
@@ -282,7 +282,7 @@ class OptimizedMatchService {
 
       // Fetch odds data with caching
       const response = await this.executeAPIRequest<any>(
-        `https://terminal.hpterminal.com/cricket/odds?gameId=${gameId}`,
+        `https://data.hpterminal.com/cricket/odds?gameId=${gameId}`,
         `odds_${gameId}`
       );
 

@@ -70,7 +70,7 @@ class MatchWorkerService {
 
       console.log('MatchWorkerService: Fetching matches from external API...');
 
-      const response = await axios.get('https://terminal.hpterminal.com/cricket/matches', {
+      const response = await axios.get('https://data.hpterminal.com/cricket/matches', {
         timeout: 15000,
         headers: {
           'User-Agent': 'CricketApp/1.0',
@@ -141,7 +141,7 @@ class MatchWorkerService {
       for (const match of matches) {
         try {
           const response = await axios.get(
-            `https://terminal.hpterminal.com/cricket/odds?gameId=${match.gameId}`,
+            `https://data.hpterminal.com/cricket/odds?gameId=${match.gameId}`,
             {
               timeout: 10000,
               headers: {

@@ -9,7 +9,7 @@ class AutoDeclareService {
   private match = MatchModel;
   private matchBetService = new MatchBetService();
 
-  private readonly fancyResultApiUrl = process.env.FANCY_RESULT_API_URL || 'https://terminal.hpterminal.com/betfair-result';
+  private readonly fancyResultApiUrl = process.env.FANCY_RESULT_API_URL || 'https://data.hpterminal.com/betfair-result';
   private readonly fancyResultMarketParam = process.env.FANCY_RESULT_MARKET_PARAM || 'marketId';
   private readonly fancyResultSport = process.env.FANCY_RESULT_SPORT || 'cricket';
   private readonly fancyResultType = process.env.FANCY_RESULT_TYPE || 'NEW_FANCY';

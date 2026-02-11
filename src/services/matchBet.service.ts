@@ -439,6 +439,7 @@ class MatchBetService {
       throw new HttpException(400, 'Match is not active for betting');
     }
 
+
     // === delay before updating match ===
     await this.delay(match.bet_delay * 1000);
 
@@ -2905,7 +2906,6 @@ class MatchBetService {
       {
         $set: {
           isDeclared: false,
-          isAuto: false,
           isActive: true,
           resultScore: null,
           settledAt: new Date()
