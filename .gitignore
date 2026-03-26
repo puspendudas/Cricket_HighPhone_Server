@@ -130,3 +130,11 @@ dist
 .pnp.*
 firebase.json
 src/assets/firebase.json
+
+# Local MongoDB data (persistent volumes)
+data/
+
+# Sync service
+sync-service/node_modules/
+sync-service/dist/
+sync-service/logs/

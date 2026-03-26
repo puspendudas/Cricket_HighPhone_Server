@@ -13,8 +13,6 @@ import EnquiryRoute from './routes/enquiry/enquiry';
 import { validateEnvironment } from '@utils/validateEnv';
 import AgentRoute from './routes/admin/agent.index';
 import AgentTransactionRoute from './routes/transaction/agent.transaction';
-import AgentMarketRoute from './routes/market/agent.index';
-import AgentBetRoute from './routes/bet/agent.index';
 
 import MatchRoute from './routes/match/index';
 import MatchBetRoute from './routes/matchBet/index';
@@ -27,7 +25,7 @@ import AutoDeclareRoute from './routes/autoDeclare';
 validateEnvironment();
 
 const app = new App([new IndexRoute(), new MonitoringRoute(), new AppUsersRoute(), new AdminUsersRoute(), new AuthRoute(), new AdminRoute(), new MiscRoute(), new EnquiryRoute(), new AgentRoute(), new AgentTransactionRoute(),
-new AgentMarketRoute(), new AgentBetRoute(), new MatchRoute(), new MatchBetRoute(), new AdminAnnouncementRoute(), new SettlementRoute(), new AutoDeclareRoute()]);
+new MatchRoute(), new MatchBetRoute(), new AdminAnnouncementRoute(), new SettlementRoute(), new AutoDeclareRoute()]);
 
 // Handle graceful shutdown
 process.on('SIGTERM', () => {

@@ -10,9 +10,9 @@
     }
   },
   "module": {
-    "type": "commonjs",  // Ensures ES module output (import/export)
-    "strict": false  // Enforce strict module resolution
+    "type": "commonjs",
+    "strict": false
   },
-  "sourceMaps": true,  // Enables source maps
-  "minify": true // Optional, if you want to minify the code
+  "sourceMaps": true,
+  "minify": true
 }

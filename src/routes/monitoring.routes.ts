@@ -1,28 +1,30 @@
 import { Router, Request, Response } from 'express';
-import { Routes } from '@interfaces/routes.interface';
-import { logger } from '@utils/logger';
-import MonitoringService from '@services/monitoring.service';
-import MigrationHelper from '@utils/migrationHelper';
+import { Routes } from '@/interfaces/routes.interface';
+import { logger } from '@/utils/logger';
+import MonitoringService from '@/services/monitoring.service';
 import { getConnectionHealth, getConnectionStats } from '@/databases/optimizedIndex';
+import { autoDeclareWorkerManager } from '@/utils/autoDeclareWorkerManager';
+import { terminalSocketClient } from '@/services/terminalSocketClient';
 
 /**
- * Monitoring routes for real-time system health, performance metrics, and cron job management
- * Provides comprehensive endpoints for monitoring the optimized cron worker system
+ * Monitoring routes for real-time system health, performance metrics, cron workers, and database.
+ * Path: /monitoring
  */
 class MonitoringRoute implements Routes {
   public path = '/monitoring';
   public router = Router();
   private monitoringService = MonitoringService.getInstance();
-  private migrationHelper = MigrationHelper.getInstance();
 
   constructor() {
     this.initializeRoutes();
   }
 
   private initializeRoutes() {
+    this.router.get(`${this.path}/ping`, this.getPing);
     this.router.get(`${this.path}/health`, this.getHealth.bind(this));
     this.router.get(`${this.path}/performance`, this.getPerformance.bind(this));
     this.router.get(`${this.path}/cron-status`, this.getCronStatus.bind(this));
+    this.router.get(`${this.path}/workers`, this.getWorkersStatus.bind(this));
     this.router.get(`${this.path}/database`, this.getDatabase.bind(this));
     this.router.get(`${this.path}/alerts`, this.getAlerts.bind(this));
     this.router.post(`${this.path}/reset-metrics`, this.resetMetrics.bind(this));
@@ -30,7 +32,38 @@ class MonitoringRoute implements Routes {
     this.router.get(`${this.path}/migration-status`, this.getMigrationStatus.bind(this));
     this.router.post(`${this.path}/force-gc`, this.forceGC.bind(this));
     this.router.get(`${this.path}/system-info`, this.getSystemInfo.bind(this));
+    this.router.get(`${this.path}/websocket`, this.getWebSocketStatus.bind(this));
   }
+
+  /** GET /ping - simple liveness check for load balancers */
+  private getPing = (_req: Request, res: Response) => {
+    res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+  };
+
+  /** GET /workers - live status of worker threads and WebSocket */
+  private getWorkersStatus = async (_req: Request, res: Response) => {
+    try {
+      const autoDeclareStatus = await autoDeclareWorkerManager.getCronJobsStatus();
+      const wsStatus = terminalSocketClient.getStatus();
+      res.status(200).json({
+        status: 'success',
+        timestamp: new Date().toISOString(),
+        data: {
+          workers: {
+            autoDeclare: autoDeclareStatus,
+            terminalWebSocket: wsStatus,
+          }
+        }
+      });
+    } catch (error: any) {
+      logger.error('[MonitoringRoutes] Error getting workers status:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get workers status',
+        error: error?.message ?? String(error)
+      });
+    }
+  };
 
   /**
    * @route GET /api/monitoring/health
@@ -134,41 +167,40 @@ class MonitoringRoute implements Routes {
    * @access Public (should be protected in production)
    */
   private async getCronStatus(req: Request, res: Response) {
-  try {
-    // This would need to be adapted based on your current cron worker manager
-    // For now, we'll return monitoring service data
+    try {
       const healthReport = this.monitoringService.getHealthReport();
-    
-    const cronStatus = {
-      timestamp: new Date().toISOString(),
-      jobs: healthReport.cronJobs,
-      performance: {
-        totalExecutions: healthReport.cronJobs.totalExecutions,
-        totalErrors: healthReport.cronJobs.totalErrors,
-        errorRate: (healthReport.cronJobs.errorRate * 100).toFixed(2) + '%',
-        averageExecutionTime: healthReport.cronJobs.averageExecutionTime + 'ms',
-        longestExecutionTime: healthReport.cronJobs.longestExecutionTime + 'ms',
-        lastExecution: new Date(healthReport.cronJobs.lastExecution).toISOString()
-      },
-      recommendations: healthReport.recommendations.filter(r => 
-        r.toLowerCase().includes('cron') || r.toLowerCase().includes('job')
-      )
-    };
-    
-    res.status(200).json({
-       status: 'success',
-       data: cronStatus
-     });
-     
-   } catch (error) {
-     logger.error('[MonitoringRoutes] Error getting cron status:', error);
-     res.status(500).json({
-       status: 'error',
-       message: 'Failed to get cron status',
-       error: error.message
-     });
-   }
- }
+      let workersAutoDeclare: any = null;
+      try {
+        workersAutoDeclare = await autoDeclareWorkerManager.getCronJobsStatus();
+      } catch (e) {
+        logger.warn('[MonitoringRoutes] Could not fetch auto-declare worker status:', (e as Error)?.message);
+      }
+      const cronStatus = {
+        timestamp: new Date().toISOString(),
+        jobs: healthReport.cronJobs,
+        performance: {
+          totalExecutions: healthReport.cronJobs.totalExecutions,
+          totalErrors: healthReport.cronJobs.totalErrors,
+          errorRate: (healthReport.cronJobs.errorRate * 100).toFixed(2) + '%',
+          averageExecutionTime: healthReport.cronJobs.averageExecutionTime + 'ms',
+          longestExecutionTime: healthReport.cronJobs.longestExecutionTime + 'ms',
+          lastExecution: new Date(healthReport.cronJobs.lastExecution).toISOString()
+        },
+        workers: workersAutoDeclare ? { autoDeclare: workersAutoDeclare } : undefined,
+        recommendations: healthReport.recommendations.filter((r: string) =>
+          r.toLowerCase().includes('cron') || r.toLowerCase().includes('job')
+        )
+      };
+      res.status(200).json({ status: 'success', data: cronStatus });
+    } catch (error: any) {
+      logger.error('[MonitoringRoutes] Error getting cron status:', error);
+      res.status(500).json({
+        status: 'error',
+        message: 'Failed to get cron status',
+        error: error?.message ?? String(error)
+      });
+    }
+  }
 
   /**
    * @route GET /api/monitoring/database
@@ -341,12 +373,11 @@ class MonitoringRoute implements Routes {
    */
   private async getMigrationStatus(req: Request, res: Response) {
   try {
-      const migrationStatus = this.migrationHelper.getMigrationStatus();
-    
     res.status(200).json({
        status: 'success',
        data: {
-         ...migrationStatus,
+         state: 'completed',
+         note: 'Migrated from cron polling to WebSocket',
          timestamp: new Date().toISOString()
        }
      });
@@ -516,6 +547,22 @@ class MonitoringRoute implements Routes {
   
   return grouped;
  }
+
+ private getWebSocketStatus = (_req: Request, res: Response) => {
+   try {
+     const status = terminalSocketClient.getStatus();
+     res.status(200).json({
+       status: 'success',
+       timestamp: new Date().toISOString(),
+       data: status,
+     });
+   } catch (error: any) {
+     res.status(500).json({
+       status: 'error',
+       message: error.message,
+     });
+   }
+ };
 }
 
 export default MonitoringRoute;

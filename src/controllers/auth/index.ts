@@ -79,7 +79,8 @@ class AuthController {
   public getMe = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userData: User = req.user;
-      res.status(200).json({ message: 'Check SuccessFull', data: userData });
+      const lockStatus = await this.authService.getUserEffectiveLockStatus(userData._id.toString());
+      res.status(200).json({ message: 'Check SuccessFull', data: userData, lockStatus });
     } catch (error) {
       next(error);
     }

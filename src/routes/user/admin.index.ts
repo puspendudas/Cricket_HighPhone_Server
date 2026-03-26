@@ -13,10 +13,10 @@ import WalletHistoryController from '@/controllers/walletHistory';
 // Helper middleware: allows access if either admin or user is authenticated
 function adminOrUserMiddleware(req, res, next) {
   // Try adminMiddleware first
-  adminMiddleware(req, res, function(adminErr) {
+  adminMiddleware(req, res, function (adminErr) {
     if (!adminErr) return next(); // admin passed
     // If admin fails, try authMiddleware
-    authMiddleware(req, res, function(userErr) {
+    authMiddleware(req, res, function (userErr) {
       if (!userErr) return next(); // user passed
       // If both fail, return the admin error (or user error if admin error is not present)
       return next(adminErr || userErr);

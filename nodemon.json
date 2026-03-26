@@ -3,6 +3,11 @@
         "src",
         ".env"
     ],
+    "delay": 1500,
+    "watchOptions": {
+        "usePolling": true,
+        "interval": 1000
+    },
     "ext": "js,ts,json",
     "ignore": [
         "src/logs/*",

@@ -2,7 +2,6 @@ import { isMainThread, parentPort } from 'worker_threads';
 import * as cron from 'node-cron';
 import { logger } from '../utils/logger';
 import DB from '../databases';
-import AutoDeclareService from '../services/autoDeclare.service';
 
 function log(message: string, ...args: any[]) {
   logger.info(`[AutoDeclareWorker] ${message}`, ...args);
@@ -11,7 +10,7 @@ function log(message: string, ...args: any[]) {
 class AutoDeclareWorker {
   private cronJobs: Map<string, cron.ScheduledTask> = new Map();
   private isReady = false;
-  private autoDeclareService: AutoDeclareService;
+  private autoDeclareService!: import('../services/autoDeclare.service').default;
   private isJobRunning = false;
 
   constructor() {
@@ -30,6 +29,8 @@ class AutoDeclareWorker {
       await DB();
       await new Promise(resolve => setTimeout(resolve, 1000));
 
+      // Dynamic import keeps worker thread startup light; heavy graph (MatchBetService, etc.) loads after DB is up.
+      const { default: AutoDeclareService } = await import('../services/autoDeclare.service');
       this.autoDeclareService = new AutoDeclareService();
       this.isReady = true;
 
@@ -39,6 +40,12 @@ class AutoDeclareWorker {
     } catch (error) {
       log(`Failed to initialize: ${(error as Error).message}`);
       this.isReady = false;
+      if (parentPort) {
+        parentPort.postMessage({
+          type: 'WORKER_INIT_FAILED',
+          error: (error as Error).message,
+        });
+      }
     }
   }
 
@@ -59,9 +66,11 @@ class AutoDeclareWorker {
     const { type, id } = message;
 
     if (type === 'PING') {
-      if (this.isReady) {
-        this.sendResponse(id, { success: true, message: 'Worker is ready' });
-      }
+      this.sendResponse(id, {
+        success: this.isReady,
+        message: this.isReady ? 'Worker is ready' : 'Worker still initializing',
+        error: this.isReady ? undefined : 'not_ready',
+      });
       return;
     }
 

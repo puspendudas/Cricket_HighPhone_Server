@@ -9,7 +9,8 @@ import { MatchBetType } from '@/interfaces/matchBet.interface';
  */
 export class CreateMatchBetDto {
   @IsMongoId({ message: 'Please provide a valid User ID' })
-  public user_id: string;
+  @IsOptional()
+  public user_id?: string;
 
   @IsMongoId({ message: 'Please provide a valid Match ID' })
   public match_id: string;

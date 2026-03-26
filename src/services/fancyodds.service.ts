@@ -49,34 +49,37 @@ class FancyOddsService {
                     status: oddData.status || ""
                 };
 
-                // Only set isFancyEnded to false if we have valid data
+                // UltraFast match aggregation only includes rows with isActive + isEnabled (see ultraFast.match.service).
+                // $setOnInsert defaults both to false; without a $set here, upserts never become visible.
                 if (hasValidOddData) {
                     setFields.isFancyEnded = false;
+                }
+
+                const $setOnInsert: Record<string, any> = {
+                    id: `${mid}_${sid}`,
+                    matchId: matchId,
+                    gameId,
+                    marketId: mid,
+                    market,
+                    sid: Number(sid),
+                    remark: oddData.remark || "",
+                    min: 100,
+                    max: 25000,
+                    sno: oddData.sno || null,
+                    rname: oddData.rname || "",
+                    isDeclared: false,
+                    resultScore: ""
+                };
+
+                // Remove any keys from $setOnInsert that are already in $set to avoid MongoDB path conflicts
+                for (const key of Object.keys(setFields)) {
+                    delete $setOnInsert[key];
                 }
 
                 bulkUpdateOps.push({
                     updateOne: {
                         filter: { gameId, sid: Number(sid) },
-                        update: {
-                            $set: setFields,
-                            $setOnInsert: {
-                                id: `${mid}_${sid}`,
-                                matchId: matchId,
-                                gameId,
-                                marketId: mid,
-                                market,
-                                sid: Number(sid),
-                                remark: oddData.remark || "",
-                                min: 100,
-                                max: 25000,
-                                sno: oddData.sno || null,
-                                rname: oddData.rname || "",
-                                isActive: false,
-                                isEnabled: false,
-                                isDeclared: false,
-                                resultScore: ""
-                            }
-                        },
+                        update: { $set: setFields, $setOnInsert },
                         upsert: true
                     }
                 });
@@ -88,21 +91,33 @@ class FancyOddsService {
             }
 
             // Fetch existing odds to check which ones are NOT in incoming data
-            const existingFancyOdds = await this.fancyOdds.find({ gameId }).select('sid').lean();
+            const existingFancyOdds = await this.fancyOdds.find({ gameId }).select('sid isEnabled').lean();
 
             // Mark isFancyEnded = true for objects that exist in DB but NOT in incoming data
-            const sidsNotInIncoming: number[] = [];
+            const sidsNotInIncomingToDelete: number[] = [];
+            const sidsNotInIncomingToKeep: number[] = [];
+            
             for (const existing of existingFancyOdds) {
                 const sid = existing.sid.toString();
                 if (!incomingSidSet.has(sid)) {
-                    sidsNotInIncoming.push(Number(sid));
+                    if (existing.isEnabled) {
+                        sidsNotInIncomingToKeep.push(Number(sid));
+                    } else {
+                        sidsNotInIncomingToDelete.push(Number(sid));
+                    }
                 }
             }
 
-            if (sidsNotInIncoming.length > 0) {
+            if (sidsNotInIncomingToDelete.length > 0) {
+                await this.fancyOdds.deleteMany(
+                    { gameId, sid: { $in: sidsNotInIncomingToDelete } }
+                );
+            }
+
+            if (sidsNotInIncomingToKeep.length > 0) {
                 await this.fancyOdds.updateMany(
-                    { gameId, sid: { $in: sidsNotInIncoming } },
-                    { $set: { isFancyEnded: true } }
+                    { gameId, sid: { $in: sidsNotInIncomingToKeep } },
+                    { $set: { isFancyEnded: true, b1: "", bs1: "", l1: "", ls1: "" } }
                 );
             }
 
@@ -124,8 +139,20 @@ class FancyOddsService {
 
     public async getFancyOddsByGameId(gameId: string): Promise<any[]> {
         try {
+            const gid = String(gameId ?? '').trim();
+            // Plain { gameId } fails when collection has number and param is string (or vice versa).
+            const gameIdMatch = {
+                $match: {
+                    $expr: {
+                        $eq: [
+                            { $toString: { $ifNull: ['$gameId', ''] } },
+                            { $literal: gid },
+                        ],
+                    },
+                },
+            };
             const fancyOddsWithNonDeletedBetCount = await this.fancyOdds.aggregate([
-                { $match: { gameId } },
+                gameIdMatch,
                 {
                     $lookup: {
                         from: "matchbets",
@@ -135,7 +162,12 @@ class FancyOddsService {
                                 $match: {
                                     $expr: {
                                         $and: [
-                                            { $eq: ["$game_id", "$$gameId"] },
+                                            {
+                                                $eq: [
+                                                    { $toString: { $ifNull: ['$game_id', ''] } },
+                                                    { $toString: { $ifNull: ['$$gameId', ''] } },
+                                                ],
+                                            },
                                             { $eq: ["$sid", "$$sid"] },
                                             { $eq: ["$bet_type", "FANCY"] },
                                             { $ne: ["$status", MatchBetStatus.DELETED] } // ✅ only non-deleted

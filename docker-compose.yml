@@ -1,35 +1,119 @@
-version: '3.7'
-
+# Terminal + API must use DB_URL → local `mongodb` service (below). Atlas is updated only by sync-service (ATLAS_DB_URL).
 services:
+  mongodb:
+    image: mongo:7
+    container_name: cricket_mongodb
+    command:
+      - mongod
+      - --replSet=rs0
+      - --bind_ip_all
+      - --quiet
+      - --setParameter
+      - "logComponentVerbosity={verbosity: 0, network: {verbosity: -1}, storage: {verbosity: -1}, accessControl: {verbosity: -1}}"
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/mongodb:/data/db
+      - ./data/mongodb-config:/data/configdb
+    environment:
+      TZ: Asia/Kolkata
+    restart: always
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mongo-init:
+    image: mongo:7
+    container_name: cricket_mongo_init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: >
+      mongosh --host mongodb:27017 --eval '
+        try {
+          rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongodb:27017" }] });
+          print("Replica set initiated successfully");
+        } catch(e) {
+          if (e.codeName === "AlreadyInitialized") {
+            print("Replica set already initialized");
+          } else {
+            throw e;
+          }
+        }
+      '
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    container_name: cricket_redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 
   server:
     build:
       context: ./
       target: development-build-stage
-      dockerfile: Dockerfile
+      dockerfile: Dockerfile.dev
     container_name: cricket_server
+    env_file:
+      - .env.development.local
     environment:
       - TZ=Asia/Kolkata
+      # Must match ports mapping host:container (8778:2552 → listen on 2552 in container)
+      - PORT=2552
+      - CHOKIDAR_USEPOLLING=true
+      - CHOKIDAR_INTERVAL=1000
+      # Primary DB: local rs — same as sync-service source; ATLAS_DB_URL in .env is for sync only.
+      - DB_URL=mongodb://mongodb:27017/gameserver?replicaSet=rs0
+      - REDIS_URL=redis://redis:6379
     ports:
       - '8778:2552'
     volumes:
       - ./:/app
-      - /app/node_modules
+      # Persists node_modules in a named volume. After package.json changes, run:
+      #   docker compose run --rm server npm install
+      # or remove the volume once: docker volume ls | grep server_node_modules
+      - server_node_modules:/app/node_modules
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: always
-    deploy:
-      # resources:
-      #   limits:
-      #     cpus: '4'
-      #     memory: 4G
-    # networks:
-    #   myipvlan:
-    #     ipv4_address: 192.168.0.6
 
-# networks:
-#   myipvlan:
-#     external: true
-#     name: br0
+  sync-service:
+    build:
+      context: ./sync-service
+      dockerfile: Dockerfile
+    container_name: cricket_sync_service
+    env_file:
+      - .env
+    environment:
+      TZ: Asia/Kolkata
+      DB_URL: mongodb://mongodb:27017/gameserver?replicaSet=rs0
+    volumes:
+      - ~/dbBackup:/backup
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: always
 
 volumes:
   data:
+    driver: local
+  server_node_modules:
+    driver: local
+  redis_data:
     driver: local

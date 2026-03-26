@@ -4,9 +4,6 @@ import { APP_SECRET_KEY } from '@/config';
 import { HttpException } from '@exceptions/HttpException';
 import { DataStoredInToken, RequestWithUser } from '@interfaces/auth.interface';
 import User from '@/models/user.model';
-import path from 'path';
-import fs from 'fs';
-const maintenanceFilePath = path.join(__dirname,'..','..', 'maintenance.json');
 
 
 const authMiddleware = async (req: RequestWithUser, res: Response, next: NextFunction) => {
@@ -17,37 +14,29 @@ const authMiddleware = async (req: RequestWithUser, res: Response, next: NextFun
       const secretKey: string = APP_SECRET_KEY;
       const verificationResponse = verify(Authorization, secretKey) as DataStoredInToken;
       const userId = verificationResponse.id;
-      const findUser = await User.findById(userId);
+      const findUser = await User.findById(userId).select('+session_token');
 
       if (findUser) {
+        const tokenSession = verificationResponse.sessionToken;
+        if (!tokenSession || !findUser.session_token || tokenSession !== findUser.session_token) {
+          console.warn('[auth.middleware] Session token mismatch', { userId, path: req.originalUrl });
+          next(new HttpException(401, 'Session expired'));
+          return;
+        }
         req.user = findUser;
         next();
       } else {
+        console.warn('[auth.middleware] Token verified but user not found', { userId, path: req.originalUrl });
         next(new HttpException(401, 'Wrong authentication token'));
       }
     } else {
+      console.warn('[auth.middleware] Missing token', { path: req.originalUrl });
       next(new HttpException(404, 'Authentication token missing'));
     }
   } catch (error) {
+    console.warn('[auth.middleware] Token verification failed', { path: req.originalUrl, error: error?.message || error });
     next(new HttpException(440, 'Wrong authentication token Error'));
   }
 };
 
-const checkMaintenanceMode = (req: RequestWithUser, res: Response, next: NextFunction) => {
-  fs.readFile(maintenanceFilePath, 'utf8', (err, data) => {
-      if (err) {
-          return res.status(500).json({ message: 'Unable to read maintenance file' });
-      }
-
-      const maintenanceData = JSON.parse(data);
-      if (maintenanceData.sanitizedData.maintainence && req.url !== '/maintenance') {
-          return res.status(503).json({ message: 'The system is under maintenance. Please try again later.', maintenanceData: maintenanceData.sanitizedData });
-      }
-      // if (maintenanceData.sanitizedData.app_version_req && req.url !== '/maintenance') {
-      //     return res.status(426).json({ message: 'This APP version is not supported. Please try again later.', maintenanceData: maintenanceData.sanitizedData });
-      // }
-      next();
-  });
-};
-
-export default authMiddleware; checkMaintenanceMode;
+export default authMiddleware;

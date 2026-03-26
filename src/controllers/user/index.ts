@@ -103,9 +103,11 @@ class UsersController {
     }
   };
 
-  public updateUserMatchBmLock = async (req: Request, res: Response, next: NextFunction) => {
+  public updateUserMatchBmLock = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userData: UpdateUserMatchLockDto = req.body;
+      // Enforce lock scope to authenticated admin hierarchy only.
+      userData.adminId = req.admin?._id?.toString();
       await this.userServices.updateUserMatchBmLock(userData);
 
       res.status(200).json({ status: 'success', message: "BM lock updated successful" });
@@ -114,9 +116,11 @@ class UsersController {
     }
   };
 
-  public updateUserAllMatchBmLock = async (req: Request, res: Response, next: NextFunction) => {
+  public updateUserAllMatchBmLock = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userData: UpdateUserAllMatchLockDto = req.body;
+      // Enforce lock scope to authenticated admin hierarchy only.
+      userData.adminId = req.admin?._id?.toString();
       await this.userServices.updateUserAllMatchBmLock(userData);
 
       res.status(200).json({ status: 'success', message: "All BM lock updated successful" });
@@ -125,9 +129,11 @@ class UsersController {
     }
   };
 
-  public updateUserMatchFancyLock = async (req: Request, res: Response, next: NextFunction) => {
+  public updateUserMatchFancyLock = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userData: UpdateUserMatchLockDto = req.body;
+      // Enforce lock scope to authenticated admin hierarchy only.
+      userData.adminId = req.admin?._id?.toString();
       await this.userServices.updateUserMatchFancyLock(userData);
 
       res.status(200).json({ status: 'success', message: "Fancy lock updated successful" });
@@ -136,9 +142,11 @@ class UsersController {
     }
   };
 
-  public updateUserAllMatchFancyLock = async (req: Request, res: Response, next: NextFunction) => {
+  public updateUserAllMatchFancyLock = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const userData: UpdateUserAllMatchLockDto = req.body;
+      // Enforce lock scope to authenticated admin hierarchy only.
+      userData.adminId = req.admin?._id?.toString();
       await this.userServices.updateUserAllMatchFancyLock(userData);
 
       res.status(200).json({ status: 'success', message: "All Fancy lock updated successful" });

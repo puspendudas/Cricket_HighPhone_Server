@@ -1,4 +1,4 @@
-import { IsString, IsMobilePhone, MaxLength, MinLength, IsOptional, IsMongoId, IsNumber, IsBoolean } from 'class-validator';
+import { IsString, IsMobilePhone, MaxLength, MinLength, IsOptional, IsMongoId, IsNumber, IsBoolean, ValidateIf } from 'class-validator';
 
 export class CreateUserDto {
   @IsString()
@@ -233,8 +233,20 @@ export class UpdateUserMatchLockDto {
   @IsMongoId({ message: 'Please provide a valid ID' })
   public adminId: string;
 
+  @IsOptional()
+  @ValidateIf(o => !o.marketId)
   @IsMongoId({ message: 'Please provide a valid match ID' })
-  public matchId: string;
+  public matchId?: string;
+
+  @IsOptional()
+  @ValidateIf(o => !o.matchId)
+  @IsString({ message: 'Please provide a valid market ID' })
+  public marketId?: string;
+
+  @IsOptional()
+  @ValidateIf(o => !o.matchId && !o.marketId)
+  @IsString({ message: 'Please provide a valid mid' })
+  public mid?: string;
 }
 
 export class UpdateUserAllMatchLockDto {
@@ -245,6 +257,14 @@ export class UpdateUserAllMatchLockDto {
   @IsMongoId({ message: 'Please provide a valid match ID' })
   @IsOptional()
   public matchId?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Please provide a valid market ID' })
+  public marketId?: string;
+
+  @IsOptional()
+  @IsString({ message: 'Please provide a valid mid' })
+  public mid?: string;
 }
 
 export class UpdateUserStackDto {

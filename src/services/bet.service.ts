@@ -41,8 +41,8 @@ class BetService {
     if (remainingWalletBalance < 0) {
       throw new HttpException(409, 'Not enough money in wallet');
     }
-
-    if (!foundUser.betting || !foundUser.verified || !foundUser.status) {
+    // betting true = locked; betting false = allowed. verified and status must be true to bet.
+    if (foundUser.betting || !foundUser.verified || !foundUser.status) {
       throw new HttpException(409, 'User not allowed to bet');
     }
 

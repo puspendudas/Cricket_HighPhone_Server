@@ -30,12 +30,21 @@ class AutoDeclareWorkerManager {
 
       logger.info(`AutoDeclareWorkerManager: Starting worker at path: ${workerPath}`);
 
+
+      // Must match main app: transpile-only. Full ts-node/register type-checks huge services and often crashes the worker (exit 1).
+      const execArgv = workerPath.endsWith('.ts')
+        ? [
+            '--require',
+            'ts-node/register/transpile-only',
+            '--require',
+            'tsconfig-paths/register',
+            '--require',
+            'reflect-metadata',
+          ]
+        : [];
+
       this.worker = new Worker(workerPath, {
-        execArgv: [
-          '--require', 'ts-node/register',
-          '--require', 'tsconfig-paths/register',
-          '--require', 'reflect-metadata'
-        ]
+        execArgv
       });
 
       this.worker.on('message', (message) => {
@@ -50,6 +59,12 @@ class AutoDeclareWorkerManager {
       this.worker.on('exit', (code) => {
         if (code !== 0) {
           logger.error(`AutoDeclareWorkerManager: Worker stopped with exit code ${code}`);
+        }
+        if (this.isInitialized && code !== 0) {
+          this.fallbackMode = true;
+          logger.warn(
+            'AutoDeclareWorkerManager: Worker exited after startup — auto declare cron is no longer running in the worker.',
+          );
         }
         this.cleanup();
       });
@@ -101,6 +116,16 @@ class AutoDeclareWorkerManager {
           pendingMessage.resolve({ success: true, message: 'Worker is ready' });
           break;
         }
+      }
+      return;
+    }
+
+    if (type === 'WORKER_INIT_FAILED') {
+      logger.error(`AutoDeclareWorkerManager: Worker thread init failed: ${message.error || 'unknown'}`);
+      for (const [messageId, pendingMessage] of this.pendingMessages) {
+        clearTimeout(pendingMessage.timeout);
+        this.pendingMessages.delete(messageId);
+        pendingMessage.reject(new Error(message.error || 'Worker init failed'));
       }
       return;
     }
@@ -209,4 +234,7 @@ class AutoDeclareWorkerManager {
   }
 }
 
+const autoDeclareWorkerManager = new AutoDeclareWorkerManager();
+
+export { autoDeclareWorkerManager };
 export default AutoDeclareWorkerManager;

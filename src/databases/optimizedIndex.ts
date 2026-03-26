@@ -133,7 +133,7 @@ const OptimizedDB = async (): Promise<typeof mongoose> => {
 const setupConnectionHandlers = (): void => {
   // Connection successful
   mongoose.connection.on('connected', () => {
-    logger.info('[OptimizedDB] Mongoose connected to MongoDB Atlas');
+    logger.info('[OptimizedDB] Mongoose connected to primary MongoDB');
     reconnectAttempts = 0;
   });
 
@@ -145,7 +145,7 @@ const setupConnectionHandlers = (): void => {
 
   // Connection disconnected
   mongoose.connection.on('disconnected', () => {
-    logger.warn('[OptimizedDB] Mongoose disconnected from MongoDB Atlas');
+    logger.warn('[OptimizedDB] Mongoose disconnected from primary MongoDB');
     
     // Attempt automatic reconnection
     if (reconnectAttempts < MAX_RECONNECT_ATTEMPTS) {
@@ -160,7 +160,7 @@ const setupConnectionHandlers = (): void => {
 
   // Connection reconnected
   mongoose.connection.on('reconnected', () => {
-    logger.info('[OptimizedDB] Mongoose reconnected to MongoDB Atlas');
+    logger.info('[OptimizedDB] Mongoose reconnected to primary MongoDB');
     reconnectAttempts = 0;
   });
 

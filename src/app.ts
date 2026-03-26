@@ -9,30 +9,32 @@ import 'reflect-metadata';
 import fileUpload from 'express-fileupload';
 import { logger, stream } from '@utils/logger';
 import errorMiddleware from '@middlewares/error.middleware';
+import http from 'http';
 
 import MarketService from './services/market.service';
-import CronWorkerManager from '@utils/cronWorkerManager';
-import AutoDeclareWorkerManager from '@utils/autoDeclareWorkerManager';
-// Child process middleware removed for performance optimization
+import { autoDeclareWorkerManager } from '@utils/autoDeclareWorkerManager';
 import { Routes } from '@interfaces/routes.interface';
 import DB from '@/databases';
 import { NODE_ENV, PORT, LOG_FORMAT, CREDENTIALS, ORIGIN_LIVE, ORIGIN_CRICKET, ORIGIN_SATTA, ORIGIN_LOCAL, ORIGIN_LOCAL_1, ORIGIN_LOCAL_2, ORIGIN_SATTA_1, ORIGIN_LIVE_1, ORIGIN_ANDROID_APP, ORIGIN_IOS_APP, DB_HOST, DB_USER, DB_PASSWORD, DB_DATABASE } from '@/config';
+import { terminalSocketClient } from '@/services/terminalSocketClient';
+import { socketService } from '@/services/socket.service';
+import { matchCache } from '@/services/matchCache.service';
+import { quitRedis } from '@/services/redis.client';
 
 class App {
   public marketService: MarketService;
   public app: express.Application;
   public env: string;
-  public port: string | number;
-  private cronWorkerManager: CronWorkerManager;
-  private autoDeclareWorkerManager: AutoDeclareWorkerManager;
+  public port: number;
+  private autoDeclareWorkerManager = autoDeclareWorkerManager;
   private intervalId?: NodeJS.Timeout;
+  private httpServer?: http.Server;
 
   constructor(routes: Routes[]) {
     this.app = express();
     this.env = NODE_ENV || 'development';
-    this.port = PORT || 3000;
-    this.cronWorkerManager = new CronWorkerManager();
-    this.autoDeclareWorkerManager = new AutoDeclareWorkerManager();
+    const parsed = Number(PORT);
+    this.port = Number.isFinite(parsed) && parsed > 0 ? parsed : 8778;
 
     this.connectToDatabase();
     this.initializeMiddlewares();
@@ -44,25 +46,37 @@ class App {
     try {
       logger.info('Starting application initialization...');
 
-      logger.info('Initializing CronWorkerManager...');
-      await this.cronWorkerManager.initialize();
-      logger.info('CronWorkerManager initialized successfully');
-
       logger.info('Initializing AutoDeclareWorkerManager...');
       await this.autoDeclareWorkerManager.initialize();
       logger.info('AutoDeclareWorkerManager initialized successfully');
 
-      this.app.listen(this.port, () => {
-        logger.info(`===================================`);
-        logger.info(`======== ENV: ${this.env} =========`);
+      this.httpServer = http.createServer(this.app);
+      await socketService.init(this.httpServer);
+
+      // Listen before match cache bootstrap so Postman/clients can connect to TCP as soon as Socket.IO + Redis adapter are ready.
+      // If bootstrap ran before listen(), any Redis/Mongo failure during bootstrap would leave no listener → "connection refused" on :8778.
+      // Bind 0.0.0.0 so Docker (and Postman on the host) can reach the server; PORT must match compose publish (e.g. 8778:2552 → PORT=2552).
+      this.httpServer.listen(this.port, '0.0.0.0', () => {
+        logger.info(`===========================================`);
+        logger.info(`============= ENV: ${this.env} ============`);
         logger.info(`🚀 App listening on the port ${this.port} 🚀`);
-        logger.info(`===================================`);
+        logger.info(`===========================================`);
       });
 
-      // Start cron jobs in worker thread
-      logger.info('Starting cron jobs...');
-      await this.startCronJobs();
-      logger.info('All cron jobs started successfully');
+      try {
+        await matchCache.bootstrap();
+      } catch (bootstrapErr: any) {
+        logger.error('matchCache.bootstrap failed (server is still listening):', bootstrapErr?.message || bootstrapErr);
+      }
+
+      logger.info('Starting auto declare cron job...');
+      await this.autoDeclareWorkerManager.startAutoDeclareCronJob();
+      logger.info('Auto declare cron job started successfully');
+
+      logger.info('Initializing Terminal WebSocket connection...');
+      await terminalSocketClient.connect();
+      logger.info('Terminal WebSocket initialized');
+
       this.checkHeapMemory();
     } catch (error) {
       logger.error('Application failed to start:', error);
@@ -74,37 +88,22 @@ class App {
   }
 
   /**
-   * Start all cron jobs in worker thread
-   */
-  private async startCronJobs(): Promise<void> {
-    try {
-      logger.info('Starting match cron job...');
-      await this.cronWorkerManager.startMatchCronJob();
-      logger.info('Match cron job started successfully');
-
-      logger.info('Starting auto declare cron job...');
-      await this.autoDeclareWorkerManager.startAutoDeclareCronJob();
-      logger.info('Auto declare cron job started successfully');
-    } catch (error) {
-      logger.error('Failed to start cron jobs:', error);
-      logger.error('Cron job error details:', error.message);
-      throw error;
-    }
-  }
-
-  /**
    * Shutdown the application and cleanup resources
    */
   public async shutdown(): Promise<void> {
     logger.info('Shutting down application...');
 
     try {
-      // Shutdown worker thread and all cron jobs
-      await this.cronWorkerManager.shutdown();
       await this.autoDeclareWorkerManager.shutdown();
-      logger.info('Worker thread shutdown complete');
+      await terminalSocketClient.disconnect();
+      await socketService.shutdown();
+      await quitRedis();
+      if (this.httpServer) {
+        this.httpServer.close();
+      }
+      logger.info('Shutdown complete');
     } catch (error) {
-      logger.error('Error during worker shutdown:', error);
+      logger.error('Error during shutdown:', error);
     }
 
     logger.info('Application shutdown complete');
@@ -136,8 +135,8 @@ class App {
     // this.app.use(cors({ origin: [ORIGIN_LOCAL, ORIGIN_CRICKET, ORIGIN_LIVE, ORIGIN_SATTA, ORIGIN_LOCAL_1, ORIGIN_LOCAL_2, ORIGIN_SATTA_1, ORIGIN_LIVE_1, ORIGIN_ANDROID_APP, ORIGIN_IOS_APP], optionsSuccessStatus: 200, credentials: CREDENTIALS }));
     this.app.use(cors({
       origin: [
-        'https://cricket.highphone11.com',
         'https://highphone11.com',
+        'https://cricket.highphone11.com',
         'localhost:3000',
         'http://localhost:3000',
         'localhost:3030',

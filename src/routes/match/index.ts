@@ -8,14 +8,15 @@ import { CreateMatchDto, UpdateMatchBetDelayDto, UpdateMatchMinMaxDto } from '@/
 import adminMiddleware from '@/middlewares/admin.middleware';
 import authMiddleware from '@/middlewares/auth.middleware';
 import { logger } from '@utils/logger';
+import { terminalSocketClient } from '@/services/terminalSocketClient';
 
 // Helper middleware: allows access if either admin or user is authenticated
 function adminOrUserMiddleware(req, res, next) {
   // Try adminMiddleware first
-  adminMiddleware(req, res, function(adminErr) {
+  adminMiddleware(req, res, function (adminErr) {
     if (!adminErr) return next(); // admin passed
     // If admin fails, try authMiddleware
-    authMiddleware(req, res, function(userErr) {
+    authMiddleware(req, res, function (userErr) {
       if (!userErr) return next(); // user passed
       // If both fail, return the admin error (or user error if admin error is not present)
       return next(adminErr || userErr);
@@ -35,11 +36,13 @@ class MatchRoute implements Routes {
     // ROUTES FOR MATCHES
     private initializeRoutes() {
         // these routes are for admin and user both
+        // Static `/all/...` paths must stay before `/:matchId` so `all` is never captured as a match id.
+        // More specific `/all/declared/...` before `/all/:status` so `declared` is not treated as a status token.
         this.router.get(`${this.path}/all`, adminOrUserMiddleware, this.matchController.getAllMatches);
+        this.router.get(`${this.path}/all/declared/:status/:userId`, adminOrUserMiddleware, this.matchController.getAllMatchesByDeclaredStatus);
+        this.router.get(`${this.path}/all/:status`, adminOrUserMiddleware, this.matchController.getAllMatchesByStatus);
         this.router.get(`${this.path}/:matchId`, adminOrUserMiddleware, this.matchController.getUndeclaredMatchById);
         this.router.get(`${this.path}/:matchId/all`, adminOrUserMiddleware, this.matchController.getAllMatchById);
-        this.router.get(`${this.path}/all/:status`, adminOrUserMiddleware, this.matchController.getAllMatchesByStatus);
-        this.router.get(`${this.path}/all/declared/:status/:userId`, adminOrUserMiddleware, this.matchController.getAllMatchesByDeclaredStatus);
         this.router.get(`${this.path}/admin/all/declared/:status/:adminId/:matchId`, adminOrUserMiddleware, this.matchController.getAdminAllMatchesByDeclaredStatus);
         this.router.get(`${this.path}/admin/exposure/:adminId/:matchId`, adminOrUserMiddleware, this.matchController.getAdminExposureMatchesByDeclaredStatus);
         this.router.get(`${this.path}/admin/all/total/:adminId`, adminOrUserMiddleware, this.matchController.getAdminAllMatchesByTotal);
@@ -60,20 +63,21 @@ class MatchRoute implements Routes {
      */
     private getCronJobStatus = (req: any, res: any) => {
         try {
+            const wsStatus = terminalSocketClient.getStatus();
             res.json({
                 success: true,
-                message: 'Match cron jobs are now handled in worker thread for better performance',
+                message: 'Match data is handled via WebSocket',
                 data: {
-                    workerThread: true,
+                    mode: 'websocket',
+                    websocket: wsStatus,
                     timestamp: new Date().toISOString(),
-                    note: 'Use /api/v1/cron-status endpoint to get detailed worker thread status'
                 }
             });
         } catch (error) {
-            logger.error('Failed to get cron job status:', error);
+            logger.error('Failed to get status:', error);
             res.status(500).json({
                 success: false,
-                message: 'Failed to get cron job status',
+                message: 'Failed to get status',
                 error: error.message
             });
         }

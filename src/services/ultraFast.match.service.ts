@@ -28,13 +28,23 @@ export class UltraFastMatchService {
             const session = await mongoose.startSession();
 
             try {
+                const id = String(eventId).trim();
                 const result = await this.match.aggregate([
                     {
-                        // Strictly match only declared === false
+                        // Join key is often the same as eventId or gameId; support both + string/number BSON.
                         $match: {
-                            eventId,
-                            declared: { $eq: false }
-                        }
+                            $and: [
+                                { declared: { $eq: false } },
+                                {
+                                    $expr: {
+                                        $or: [
+                                            { $eq: [{ $toString: { $ifNull: ['$eventId', ''] } }, id] },
+                                            { $eq: [{ $toString: { $ifNull: ['$gameId', ''] } }, id] },
+                                        ],
+                                    },
+                                },
+                            ],
+                        },
                     },
                     {
                         $project: {
@@ -62,17 +72,22 @@ export class UltraFastMatchService {
                     {
                         $lookup: {
                             from: 'fancyodds',
-                            localField: 'gameId',
-                            foreignField: 'gameId',
-                            as: 'fancyOdds',
+                            let: { matchGameId: '$gameId' },
                             pipeline: [
                                 {
                                     $match: {
-                                        $and: [
-                                            { isActive: true },
-                                            { isEnabled: true }
-                                        ]
-                                    }
+                                        $expr: {
+                                            $eq: [
+                                                { $toString: { $ifNull: ['$gameId', ''] } },
+                                                { $toString: { $ifNull: ['$$matchGameId', ''] } },
+                                            ],
+                                        },
+                                    },
+                                },
+                                {
+                                    $match: {
+                                        $and: [{ isActive: true }, { isEnabled: true }],
+                                    },
                                 },
                                 {
                                     $project: {
@@ -93,18 +108,18 @@ export class UltraFastMatchService {
                                         isDeclared: 1,
                                         isActive: 1,
                                         isEnabled: 1,
-                                        isFancyEnded: 1
-                                    }
+                                        isFancyEnded: 1,
+                                    },
                                 },
-                                { $limit: 3000 }
-                            ]
-                        }
+                                { $limit: 3000 },
+                            ],
+                            as: 'fancyOdds',
+                        },
                     },
                     { $limit: 1 }
                 ], {
                     allowDiskUse: false,
                     maxTimeMS: 80,
-                    hint: { eventId: 1, declared: 1 }, // compound index
                     readConcern: { level: "local" },
                     session
                 });
@@ -135,11 +150,20 @@ export class UltraFastMatchService {
     public async getMatchByIdFallback(eventId: string): Promise<Match & { fancyOdds: any[] } | null> {
         try {
             // Ultra-fast match query with minimal projection
-            const matchPromise = this.match.findOne({ eventId, declared: false })
+            const eid = String(eventId).trim();
+            const matchPromise = this.match
+                .findOne({
+                    declared: false,
+                    $expr: {
+                        $or: [
+                            { $eq: [{ $toString: { $ifNull: ['$eventId', ''] } }, eid] },
+                            { $eq: [{ $toString: { $ifNull: ['$gameId', ''] } }, eid] },
+                        ],
+                    },
+                })
                 .select('gameId marketId eventId eventName eventTime inPlay seriesName status declared wonby bet_delay min max teams isBMEnded isMatchEnded matchOdds bookMakerOdds')
                 .lean()
-                .maxTimeMS(50)
-                .hint({ eventId: 1, declared: 1 });
+                .maxTimeMS(50);
 
             // Get match first
             const match = await matchPromise;
@@ -149,15 +173,16 @@ export class UltraFastMatchService {
 
             // Ultra-fast fancyOdds query
             const fancyOddsPromise = this.fancyOdds.find({
-                gameId: match.gameId,
+                $expr: {
+                    $eq: [{ $toString: '$gameId' }, { $toString: match.gameId }],
+                },
                 isActive: true,
-                isEnabled: true
+                isEnabled: true,
             })
                 .select('id marketId market sid b1 bs1 l1 ls1 status min max rname isDeclared isActive isEnabled isFancyEnded')
                 .lean()
                 .limit(30)
-                .maxTimeMS(30)
-                .hint({ gameId: 1, isActive: 1, isEnabled: 1 });
+                .maxTimeMS(30);
 
             const fancyOdds = await fancyOddsPromise;
 

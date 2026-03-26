@@ -60,7 +60,7 @@ class MarketController {
   public getAllApp = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const marketData: any = req.query;
-      const userId = req.user._id as string;
+      const userId = String(req.user._id);
       const { markets, total } = await this.marketService.getAllApp(userId, {
         ...marketData,
         ...(marketData.name && { name: { $regex: marketData.name, $options: 'i' } }),

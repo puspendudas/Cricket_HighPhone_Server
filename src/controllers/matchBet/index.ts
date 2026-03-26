@@ -4,6 +4,7 @@ import { Request, Response, NextFunction } from 'express';
 import MatchBetService from '@/services/matchBet.service';
 import { CreateMatchBetDto, SettleBetDto, SettleFancyBetDto, CancelFancyBetDto } from '@/dtos/matchBet.dto';
 import { MatchBetType } from '@/interfaces/matchBet.interface';
+import { RequestWithUser } from '@/interfaces/auth.interface';
 
 /**
  * Controller for match betting operations
@@ -19,9 +20,26 @@ class MatchBetController {
    * Create a new match bet
    * POST /api/v1/match-bets/create
    */
-  public createMatchBet = async (req: Request, res: Response, next: NextFunction) => {
+  public createMatchBet = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const betData: CreateMatchBetDto = req.body;
+      const authedUserId = req.user?._id?.toString?.() ?? (req.user as any)?.id?.toString?.();
+
+      if (!authedUserId) {
+        return res.status(401).json({
+          status: "error",
+          message: "User not authenticated",
+        });
+      }
+
+      // Never trust client-provided user_id. Enforce token user.
+      if (betData.user_id && betData.user_id.toString() !== authedUserId) {
+        return res.status(403).json({
+          status: "error",
+          message: "Forbidden: user_id mismatch",
+        });
+      }
+      betData.user_id = authedUserId;
 
       // Additional validation for bet type specific fields
       if (betData.bet_type === MatchBetType.BOOKMAKER) {
@@ -466,6 +484,21 @@ class MatchBetController {
       res.status(200).json({
         status: "success",
         message: "Single bet cancelled successfully",
+        data: cancelledBet
+      });
+    } catch (error) {
+      next(error);
+    }
+  }
+
+  public showCancelledSingleBet = async (req: Request, res: Response, next: NextFunction) => {
+    try{
+      const betId = req.params.betId;
+      const cancelledBet = await this.matchBetService.showCancelledSingleBet(betId)
+
+      res.status(200).json({
+        status:"success",
+        message:"Single cancelled bet fetched successfully",
         data: cancelledBet
       });
     } catch (error) {

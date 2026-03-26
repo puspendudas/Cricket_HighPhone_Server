@@ -1,0 +1,101 @@
+# App (cricket_server) reads/writes the local `mongodb` replica set. sync-service mirrors Local → Atlas (ATLAS_DB_URL in .env.production).
+
+services:
+  mongodb:
+    image: mongo:7
+    container_name: cricket_mongodb
+    command: ["mongod", "--replSet", "rs0", "--bind_ip_all"]
+    ports:
+      - "27017:27017"
+    volumes:
+      - ./data/mongodb:/data/db
+      - ./data/mongodb-config:/data/configdb
+    environment:
+      TZ: Asia/Kolkata
+    restart: always
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+  mongo-init:
+    image: mongo:7
+    container_name: cricket_mongo_init
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    entrypoint: >
+      mongosh --host mongodb:27017 --eval '
+        try {
+          rs.initiate({ _id: "rs0", members: [{ _id: 0, host: "mongodb:27017" }] });
+          print("Replica set initiated successfully");
+        } catch(e) {
+          if (e.codeName === "AlreadyInitialized") {
+            print("Replica set already initialized");
+          } else {
+            throw e;
+          }
+        }
+      '
+    restart: "no"
+
+  redis:
+    image: redis:7-alpine
+    container_name: cricket_redis
+    ports:
+      - "6379:6379"
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    restart: always
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  cricket_server:
+    image: cricket_server
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+      target: production
+    container_name: cricket_server
+    env_file:
+      - .env.production
+    environment:
+      - TZ=Asia/Kolkata
+      - PORT=2552
+      - DB_URL=mongodb://mongodb:27017/gameserver?replicaSet=rs0
+      - REDIS_URL=redis://redis:6379
+    ports:
+      - "8778:2552"
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+
+  sync-service:
+    build:
+      context: ./sync-service
+      dockerfile: Dockerfile
+    container_name: cricket_sync_service
+    env_file:
+      - .env.production
+    environment:
+      TZ: Asia/Kolkata
+      DB_URL: mongodb://mongodb:27017/gameserver?replicaSet=rs0
+    volumes:
+      - ~/dbBackup:/backup
+    depends_on:
+      mongodb:
+        condition: service_healthy
+    restart: always
+
+volumes:
+  redis_data:
+    driver: local

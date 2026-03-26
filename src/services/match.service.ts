@@ -6,9 +6,8 @@ import { ObjectId } from 'mongodb';
 import { ObjectId as ObjectIdMongoose } from 'mongoose';
 import { Match } from '@/interfaces/match.inderface';
 import { FancyOdds } from "@/interfaces/fancyOdds.interface";
-import axios from 'axios';
-import cron from 'node-cron';
 import { logger } from '@/utils/logger';
+import axios from 'axios';
 import mongoose from 'mongoose';
 import FancyOddsService from '@/services/fancyodds.service';
 import MatchBetModel from '@/models/matchBet.model';
@@ -18,6 +17,10 @@ import UserModel from '@/models/user.model';
 import AdminModel from '@/models/admin.model';
 import ExposureModel from '@/models/exposure.model';
 import FancyOddsModel from '@/models/fancyodds.model';
+import { terminalSocketClient } from '@/services/terminalSocketClient';
+import { matchCache } from '@/services/matchCache.service';
+import { socketService } from '@/services/socket.service';
+import { DB_URL } from '@/config';
 
 class MatchService {
   public match = MatchModel;
@@ -30,8 +33,6 @@ class MatchService {
   public fancyOdds: FancyOddsService;
 
   public hierarchyService: HierarchyService;
-
-  private cronJob: cron.ScheduledTask | null = null;
 
   constructor() {
     this.fancyOdds = new FancyOddsService();
@@ -49,21 +50,69 @@ class MatchService {
   }
 
   /**
-   * Get all matches with optimized lean query
-   * @returns Promise<Match[]>
+   * Get all matches — no filter on `status` or `declared`; every row in `matches` is returned.
+   * (For status-filtered lists use `getAllMatchesByStatus` → GET `/match/all/:status`.)
+   *
+   * `compact` omits heavy arrays (`matchOdds`, `bookMakerOdds`, `otherMarketOdds`, large `teams` slices)
+   * so the list stays small for admin tables and avoids client/proxy truncation on very large collections.
    */
-  public async getAllMatches(): Promise<Match[]> {
+  public async getAllMatches(opts?: { compact?: boolean }): Promise<Match[]> {
     try {
-      // Use lean query for better performance - returns plain JS objects
-      const matches = await this.match.find()
-        .select('gameId marketId eventId eventName eventTime inPlay seriesName status declared wonby teams matchOdds bookMakerOdds')
-        .lean()
-        .sort({ createdAt: -1 })
-
+      const q = this.match.find().sort({ createdAt: -1 });
+      if (opts?.compact) {
+        q.select({
+          _id: 1,
+          gameId: 1,
+          marketId: 1,
+          eventId: 1,
+          eventName: 1,
+          seriesName: 1,
+          seriesId: 1,
+          eventTime: 1,
+          inPlay: 1,
+          status: 1,
+          declared: 1,
+          wonby: 1,
+          isBMEnded: 1,
+          isMatchEnded: 1,
+          bet_delay: 1,
+          min: 1,
+          max: 1,
+          bm_lock: 1,
+          fancy_lock: 1,
+          createdAt: 1,
+          updatedAt: 1,
+        });
+      }
+      const matches = await q.lean();
       return matches;
     } catch (error) {
       throw new Error("Failed to get all matches");
     }
+  }
+
+  /** Same filter as getAllMatches; use to cross-check list length vs DB. */
+  public async countAllMatches(): Promise<number> {
+    return this.match.countDocuments();
+  }
+
+  /**
+   * Which DB + collection Mongoose is using, plus a masked copy of the configured `DB_URL`
+   * (same redaction as startup logs) so you can point Compass at the same cluster/host.
+   */
+  public getMatchStorageMeta(): {
+    database: string;
+    collection: string;
+    dbUrlMasked: string;
+  } {
+    const db = mongoose.connection.db;
+    const raw = DB_URL || '';
+    const dbUrlMasked = raw.replace(/\/\/[^:]+:[^@]+@/, '//***:***@');
+    return {
+      database: db?.databaseName ?? 'unknown',
+      collection: this.match.collection.collectionName,
+      dbUrlMasked,
+    };
   }
 
   /**
@@ -381,7 +430,6 @@ class MatchService {
           }
         }
       ]);
-
       return matches;
     } catch (error: any) {
       throw new Error(
@@ -389,6 +437,7 @@ class MatchService {
       );
     }
   }
+
 
   public async getAllMatchesWithBetsAndAdminByTotal(
     adminId: string,
@@ -1759,7 +1808,7 @@ class MatchService {
     const summaryMap = new Map<string, Record<string, number>>();
 
     expList.forEach(exp => {
-      let currAgent = userMap.get(String(exp.user_id))!;
+      const currAgent = userMap.get(String(exp.user_id))!;
       let curr = currAgent;
 
       while (parentMap.has(curr) && !children.some(c => String(c._id) === curr)) {
@@ -1815,7 +1864,28 @@ class MatchService {
       if (!match) {
         throw new Error("Match not found");
       }
-      const updatedMatch = await this.match.findByIdAndUpdate(id, { status: !match.status }, { new: true });
+      const newStatus = !match.status;
+      const updatedMatch = await this.match.findByIdAndUpdate(id, { status: newStatus }, { new: true });
+
+      if (match.gameId) {
+        if (newStatus) {
+          terminalSocketClient.subscribeToMatch(match.gameId);
+        } else {
+          terminalSocketClient.unsubscribeFromMatch(match.gameId);
+        }
+      }
+
+      if (updatedMatch?.eventId) {
+        const eventId = updatedMatch.eventId.toString();
+        if (newStatus) {
+          const payload = await matchCache.rebuildFromUltraFast(eventId);
+          if (payload) socketService.emitMatchUpdate(eventId, payload);
+        } else {
+          await matchCache.remove(eventId);
+          socketService.emitMatchDeclared(eventId);
+        }
+      }
+
       return updatedMatch;
     } catch (error) {
       throw new Error("Failed to toggle match");
@@ -1861,6 +1931,12 @@ class MatchService {
 
       await this.fancyOdds.toggleSession(gameId, sid)
 
+      if (match.eventId) {
+        const eventId = match.eventId.toString();
+        const payload = await matchCache.rebuildFromUltraFast(eventId);
+        if (payload) socketService.emitMatchUpdate(eventId, payload);
+      }
+
     } catch (error) {
       throw new Error(`Failed to toggle fancy odds by game id: ${error.message}`);
     }
@@ -1868,7 +1944,19 @@ class MatchService {
 
   public async updateMatchSessionMinMaxLimit(matchId: string, min: number, max: number): Promise<void> {
     try {
+      const fancy = await this.fancyOddsModel.findById(matchId).select('gameId').lean();
+      if (!fancy?.gameId) {
+        throw new Error('Fancy odds not found');
+      }
+
       await this.fancyOddsModel.findByIdAndUpdate(matchId, { min: min, max: max });
+
+      const match = await this.match.findOne({ gameId: fancy.gameId }).select('eventId status declared').lean();
+      if (match?.eventId) {
+        const eventId = match.eventId.toString();
+        const payload = await matchCache.rebuildFromUltraFast(eventId);
+        if (payload) socketService.emitMatchUpdate(eventId, payload);
+      }
     } catch (error) {
       throw new Error(`Failed to update match session min max limit: ${error.message}`);
     }
@@ -1876,7 +1964,7 @@ class MatchService {
 
   public async getMatchDataByGameId(gameId: string): Promise<any> {
     try {
-      const response = await axios.get(`https://terminal.hpterminal.com/cricket/odds?gameId=${gameId}`, {
+      const response = await axios.get(`https://data.hpterminal.com/cricket/odds?gameId=${gameId}`, {
         timeout: 10000, // 10 second timeout
         headers: {
           'User-Agent': 'CricketApp/1.0',
@@ -1896,208 +1984,6 @@ class MatchService {
     }
   }
 
-  // CROM JOB FOR MATCHES
-
-  public async getMatchByCronJob(): Promise<Match[]> {
-    try {
-      // Check if database is connected
-      if (mongoose.connection.readyState !== 1) {
-        logger.warn('Database not connected, skipping match fetch');
-        return [];
-      }
-
-      const response = await axios.get('https://terminal.hpterminal.com/cricket/matches', {
-        timeout: 15000, // 15 second timeout
-        headers: {
-          'User-Agent': 'CricketApp/1.0',
-          'Accept': 'application/json'
-        }
-      });
-      const matches = response.data?.data?.data;
-
-      if (!matches || !Array.isArray(matches)) {
-        logger.warn('No matches data received or invalid format');
-        return [];
-      }
-
-      const existingMatches = await this.match.find({ gameId: { $in: matches.map(match => match.gameId) } });
-      const existingGameIds = existingMatches.map(match => match.gameId);
-      const newMatches = matches.filter(match => !existingGameIds.includes(match.gameId));
-
-      if (newMatches.length > 0) {
-        await this.match.insertMany(newMatches);
-        logger.info(`Added ${newMatches.length} new matches`);
-      }
-
-      return matches;
-    } catch (error: any) {
-      if (error.response?.status === 403) {
-        logger.warn('Access forbidden - API may require authentication or API key');
-      } else if (error.code === 'ECONNABORTED') {
-        logger.warn('Request timeout for matches API');
-      } else {
-        logger.error('Failed to get match by cron job:', error.message);
-      }
-      return [];
-    }
-  }
-
-  public async getMatchOddsDataByStatusCronJob(): Promise<any> {
-    try {
-      // Check if database is connected
-      if (mongoose.connection.readyState !== 1) {
-        logger.warn('Database not connected, skipping odds update');
-        return;
-      }
-
-      const matches = await this.match.find({ status: true, declared: false, wonBy: { $in: ["", null] } });
-
-      if (!matches || matches.length === 0) {
-        logger.info('No active matches found for odds update');
-        return;
-      }
-
-      let successCount = 0;
-      let errorCount = 0;
-
-      for (const match of matches) {
-        try {
-          const response = await axios.get(`https://terminal.hpterminal.com/cricket/odds?gameId=${match.gameId}`, {
-            timeout: 10000,
-            headers: {
-              'User-Agent': 'CricketApp/1.0',
-              'Accept': 'application/json'
-            }
-          });
-          const data = response.data?.data;
-
-          if (!data) {
-            // logger.warn(`No odds data received for match ${match.gameId}`);
-            continue;
-          }
-
-          // Extract team names from odds data for first time only
-          const teams = this.extractTeamNames(data);
-          if (teams.length > 0) {
-            await this.match.findByIdAndUpdate(match.id, {
-              teams: teams
-            });
-          }
-
-
-          // Build update object
-          const updateData: any = {
-            matchOdds: data.matchOdds || [],
-            otherMarketOdds: data.otherMarketOdds || [],
-          };
-
-          // Update only if bookMakerOdds exists and is not empty
-          if (data.bookMakerOdds && Array.isArray(data.bookMakerOdds) && data.bookMakerOdds.length > 0) {
-            updateData.bookMakerOdds = data.bookMakerOdds;
-            updateData.isBMEnded = false;
-          } else {
-            updateData.isBMEnded = true;
-          }
-
-          // Update only if matchOdds exists and is not empty
-          if (data.matchOdds && Array.isArray(data.matchOdds) && data.matchOdds.length > 0) {
-            updateData.matchOdds = data.matchOdds;
-            updateData.isMatchEnded = false;
-          } else {
-            updateData.isMatchEnded = true;
-          }
-
-
-          // Update in one call
-          await this.match.findByIdAndUpdate(match.id, updateData);
-
-
-          //handle fancyOdds
-          const fancyOdds = data.fancyOdds;
-          if (fancyOdds.length > 0) {
-            await this.fancyOdds.bulkCreateOrUpdate(fancyOdds, match.id.toString(), match.gameId);
-          }
-
-          successCount++;
-        } catch (matchError) {
-          errorCount++;
-          logger.error(`Failed to update match ${match.gameId}:`, matchError);
-          // Continue with next match instead of failing entire batch
-
-        }
-      }
-
-      logger.info(`Odds update completed: ${successCount} successful, ${errorCount} failed`);
-    } catch (error) {
-      logger.error('Failed to get match odds data by status cron job:', error);
-      // Don't throw error to prevent cron job from stopping
-    }
-  }
-
-  private extractTeamNames(data: any): string[] {
-    const teams: string[] = [];
-
-    // Try matchOdds first, then bookMakerOdds as fallback
-    const oddsSource = data.matchOdds?.[0]?.oddDatas || data.bookMakerOdds?.[0]?.oddDatas || data.bookMakerOdds?.[0]?.bm1?.oddDatas || data.bookMakerOdds?.[0]?.bm2?.oddDatas;
-
-    if (oddsSource && Array.isArray(oddsSource)) {
-      teams.push(...oddsSource
-        .filter(item => item?.rname)
-        .map(item => item.rname)
-      );
-    }
-
-    return teams;
-  }
-
-  public async runCronJob(): Promise<void> {
-    try {
-      await this.getMatchByCronJob();
-      await this.getMatchOddsDataByStatusCronJob();
-    } catch (error) {
-      logger.error('Failed to run cron job:', error);
-    }
-  }
-
-  public async scheduleCronJob(): Promise<void> {
-    try {
-      if (this.cronJob) {
-        this.cronJob.stop();
-      }
-
-      this.cronJob = cron.schedule('* * * * * *', () => {
-        this.runCronJob().catch(error => {
-          logger.error('Error in cron job execution:', error);
-        });
-      });
-
-      this.cronJob.start();
-    } catch (error) {
-      logger.error('Failed to schedule cron job:', error);
-    }
-  }
-
-  public stopCronJob(): void {
-    try {
-      if (this.cronJob) {
-        this.cronJob.stop();
-        this.cronJob = null;
-      }
-    } catch (error) {
-      logger.error('Failed to stop cron job:', error);
-    }
-  }
-
-  public isCronJobRunning(): boolean {
-    return this.cronJob !== null && this.cronJob.getStatus() === 'scheduled';
-  }
-
-  public getCronJobStatus(): string {
-    if (!this.cronJob) {
-      return 'not_started';
-    }
-    return this.cronJob.getStatus();
-  }
 }
 
 export default MatchService;

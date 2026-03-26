@@ -123,7 +123,8 @@ class AdminController {
   public getMe = async (req: RequestWithUser, res: Response, next: NextFunction) => {
     try {
       const adminData: Admin = req.body.admin;
-      res.status(200).json({ message: 'Check SuccessFull', data: adminData });
+      const lockContext = await this.adminService.getAdminLockContext(adminData._id.toString());
+      res.status(200).json({ message: 'Check SuccessFull', data: adminData, lockStatus: lockContext });
     } catch (error) {
       next(error);
     }

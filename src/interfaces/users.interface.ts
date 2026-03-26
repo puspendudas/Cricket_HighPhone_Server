@@ -40,6 +40,8 @@ interface User {
   betting: boolean;
   transfer: boolean;
   fcm: string;
+  session_token?: string;
+  session_updated_at?: Date;
   personal_notification: boolean;
   main_notification: boolean;
   starline_notification: boolean;

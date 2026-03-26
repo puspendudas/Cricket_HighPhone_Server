@@ -4,6 +4,7 @@ import { Router } from 'express';
 import MatchBetController from '@/controllers/matchBet';
 import ValidationMiddleware from '@/middlewares/validation.middleware';
 import { CreateMatchBetDto, SettleBetDto, SettleFancyBetDto, CancelFancyBetDto } from '@/dtos/matchBet.dto';
+import authMiddleware from '@/middlewares/auth.middleware';
 
 
 class MatchBetRoute {
@@ -17,7 +18,12 @@ class MatchBetRoute {
 
   private initializeRoutes() {
     // Create new match bet
-    this.router.post(`${this.path}/create`, ValidationMiddleware(CreateMatchBetDto, 'body'), this.matchBetController.createMatchBet);
+    this.router.post(
+      `${this.path}/create`,
+      authMiddleware,
+      ValidationMiddleware(CreateMatchBetDto, 'body'),
+      this.matchBetController.createMatchBet,
+    );
 
     // Get all match bets with filters (pagination, sorting, etc.)
     this.router.get(`${this.path}`, this.matchBetController.getAllMatchBets);
@@ -67,8 +73,10 @@ class MatchBetRoute {
     // Cancel Single bets
     this.router.delete(`${this.path}/cancel/single/:betId`, this.matchBetController.cancelSingleBet);
 
+    this.router.get(`${this.path}/cancel/single/:betId`, this.matchBetController.showCancelledSingleBet);
+
     // Get current user's exposure and balance (requires authentication)
-    this.router.get(`${this.path}/my-exposure`, this.matchBetController.getMyExposureAndBalance);
+    this.router.get(`${this.path}/my-exposure`, authMiddleware, this.matchBetController.getMyExposureAndBalance);
 
     // Get specific bet by ID (must be last to avoid conflicts with other routes)
     this.router.get(`${this.path}/:betId`, this.matchBetController.getBetById);

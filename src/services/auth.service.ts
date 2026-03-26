@@ -125,9 +125,10 @@ class AuthService {
         referral_code: generatedReferralCode,
         wallet: joining_bonus,
         status: status,
-        betting: auto_verified,
+        // betting lock should be OFF by default (false = unlocked)
+        betting: false,
         transfer: auto_verified,
-        agent: foundAdmin ? foundAdmin._id : null,
+        agent_id: foundAdmin ? foundAdmin._id : null,
       });
 
       const savedUser = await newUser.save({ session });
@@ -206,13 +207,18 @@ class AuthService {
     if (!isPasswordMatching) throw new HttpException(409, 'Password not matching');
 
     if (userData.fcm !== undefined) findUser.fcm = userData.fcm;
-    await findUser.save();
 
     if (!findUser.verified) {
+      await findUser.save();
       return { cookie: '', tokenData: {} as any, findUser };
     }
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    findUser.session_token = sessionToken;
+    findUser.session_updated_at = new Date();
+    await findUser.save();
+
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -228,13 +234,18 @@ class AuthService {
     if (!isPasswordMatching) throw new HttpException(409, 'Password not matching');
 
     if (userData.fcm !== undefined) findUser.fcm = userData.fcm;
-    await findUser.save();
 
     if (!findUser.verified) {
+      await findUser.save();
       return { cookie: '', tokenData: {} as any, findUser };
     }
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    findUser.session_token = sessionToken;
+    findUser.session_updated_at = new Date();
+    await findUser.save();
+
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -253,13 +264,18 @@ class AuthService {
     if (!findUser.status) throw new HttpException(403, 'User is inactive');
 
     if (userData.fcm !== undefined) findUser.fcm = userData.fcm;
-    await findUser.save();
 
     if (!findUser.verified || !findUser.status) {
+      await findUser.save();
       return { cookie: '', tokenData: {} as any, findUser };
     }
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    findUser.session_token = sessionToken;
+    findUser.session_updated_at = new Date();
+    await findUser.save();
+
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -271,7 +287,12 @@ class AuthService {
     const findUser = await this.users.findOne({ mobile: userData.mobile });
     if (!findUser) throw new HttpException(410, `This mobile ${userData.mobile} was not found`);
 
-    const tokenData = this.createToken(findUser);
+    const sessionToken = this.generateSessionToken();
+    findUser.session_token = sessionToken;
+    findUser.session_updated_at = new Date();
+    await findUser.save();
+
+    const tokenData = this.createToken(findUser, sessionToken);
     const cookie = this.createCookie(tokenData);
 
     return { cookie, tokenData, findUser };
@@ -307,11 +328,17 @@ class AuthService {
       throw new HttpException(400, 'OTP is expired, please request for new OTP');
     }
     if (userData.otp === findUser.otp) {
-      await this.users.findByIdAndUpdate(findUser.id, { verified: true, otp: "-" })
+      const sessionToken = this.generateSessionToken();
+      await this.users.findByIdAndUpdate(findUser.id, {
+        verified: true,
+        otp: "-",
+        session_token: sessionToken,
+        session_updated_at: new Date(),
+      });
       // findUser.verified = true
       // findUser.otp = "-"
       // await findUser.save()
-      const tokenData = this.createToken(findUser);
+      const tokenData = this.createToken(findUser, sessionToken);
       const cookie = this.createCookie(tokenData);
 
       return { cookie, tokenData, findUser };
@@ -351,8 +378,15 @@ class AuthService {
     await foundUser.save();
   }
 
-  public createToken(user: User): TokenData {
+  private generateSessionToken(): string {
+    return randomBytes(32).toString('hex');
+  }
+
+  public createToken(user: User, sessionToken?: string): TokenData {
     const dataStoredInToken: DataStoredInToken = { id: user.id };
+    if (sessionToken) {
+      dataStoredInToken.sessionToken = sessionToken;
+    }
     const secretKey: string = APP_SECRET_KEY;
     const expiresIn = "1d";
 
@@ -430,6 +464,31 @@ class AuthService {
       console.error('Axios Error:', error?.message || error);
       throw new HttpException(502, `Failed to generate OTP: '${error?.message || error}'`);
     }
+  }
+
+  /**
+   * Returns the effective global lock state for a user by walking up their admin hierarchy.
+   * Used by the /me endpoint so the UI can disable betting UI immediately on login.
+   */
+  public async getUserEffectiveLockStatus(userId: string): Promise<{ effectiveBmLocked: boolean; effectiveFancyLocked: boolean }> {
+    const user = await this.users.findById(userId).select('agent_id').lean();
+    if (!user?.agent_id) return { effectiveBmLocked: false, effectiveFancyLocked: false };
+
+    const adminIds: string[] = [];
+    let currentId = user.agent_id.toString();
+
+    while (true) {
+      adminIds.push(currentId);
+      const current = await this.admin.findById(currentId).select('parent_id').lean();
+      if (!current?.parent_id) break;
+      currentId = current.parent_id.toString();
+    }
+
+    const adminDocs = await this.admin.find({ _id: { $in: adminIds } }).select('bm_lock_status fancy_lock_status').lean();
+    return {
+      effectiveBmLocked: adminDocs.some((d: any) => d.bm_lock_status === true),
+      effectiveFancyLocked: adminDocs.some((d: any) => d.fancy_lock_status === true),
+    };
   }
 
 }

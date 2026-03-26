@@ -1,1 +1,8 @@
-{"sanitizedData":{"maintainence":false,"maintainence_msg":"under maintainence","app_version":"1.5.5","app_version_req":false}}
+{
+    "sanitizedData": {
+        "maintainence": false,
+        "maintainence_msg": "under maintainence",
+        "app_version": "1.5.5",
+        "app_version_req": false
+    }
+}

@@ -4,6 +4,7 @@ import { NextFunction, Request, Response } from 'express';
 import MatchService from '@/services/match.service';
 import UltraFastMatchService from '@/services/ultraFast.match.service';
 import { CreateMatchDto } from '@/dtos/match.dto';
+import { matchCache } from '@/services/matchCache.service';
 
 class MatchController {
   public matchService: MatchService;
@@ -26,8 +27,32 @@ class MatchController {
 
   public getAllMatches = async (req: Request, res: Response, next: NextFunction) => {
     try {
-      const matches = await this.matchService.getAllMatches();
-      res.status(200).json({ status: "success", message: "Matches fetched successfully", matches });
+      const compact =
+        req.query.compact === '1' ||
+        req.query.compact === 'true' ||
+        req.query.summary === '1' ||
+        req.query.summary === 'true';
+
+      const [matches, total] = await Promise.all([
+        this.matchService.getAllMatches({ compact }),
+        this.matchService.countAllMatches(),
+      ]);
+
+      const storage = this.matchService.getMatchStorageMeta();
+
+      res.status(200).json({
+        status: "success",
+        message: "Matches fetched successfully",
+        matches,
+        total,
+        /** If `matches.length !== total`, the list query should still match — log and report. */
+        listLength: matches.length,
+        meta: {
+          compact,
+          /** Compare with Compass: same database + collection name, and clear any filter in the Compass query bar. */
+          mongo: storage,
+        },
+      });
     } catch (error) {
       next(error);
     }
@@ -42,38 +67,24 @@ class MatchController {
 
     try {
       const matchId = req.params.matchId;
-      let match;
-      let method = 'ultra-fast';
-
-      try {
-        // Try ultra-fast service first (target: <80ms)
-        match = await this.ultraFastMatchService.getMatchByIdUltraFast(matchId);
-      } catch (ultraFastError: any) {
-        console.warn(`Ultra-fast query failed (${Date.now() - startTime}ms):`, ultraFastError.message);
-        method = 'fallback';
-
-        try {
-          // Fallback to optimized separate queries (target: <120ms)
-          match = await this.ultraFastMatchService.getMatchByIdFallback(matchId);
-        } catch (fallbackError: any) {
-          console.warn(`Fallback query failed (${Date.now() - startTime}ms):`, fallbackError.message);
-          method = 'standard';
-
-          // Final fallback to standard service (target: <150ms)
-          match = await this.matchService.getMatchById(matchId);
-        }
+      const match = await matchCache.get(matchId);
+      if (!match) {
+        res.status(404).json({
+          status: 'error',
+          message: 'Match not found',
+        });
+        return;
       }
 
       const responseTime = Date.now() - startTime;
 
       // Add performance headers
       res.setHeader('X-Response-Time', `${responseTime}ms`);
-      res.setHeader('X-Query-Method', method);
       res.setHeader('X-Performance-Target', responseTime < 150 ? 'MET' : 'EXCEEDED');
 
       // Log slow responses for monitoring
       if (responseTime > 150) {
-        console.warn(`SLOW RESPONSE: ${responseTime}ms for match ${matchId} using ${method} method`);
+        console.warn(`SLOW RESPONSE: ${responseTime}ms for match ${matchId} from cache`);
       }
 
       res.status(200).json({
@@ -82,7 +93,6 @@ class MatchController {
         match,
         performance: {
           responseTime: `${responseTime}ms`,
-          method: method,
           targetMet: responseTime < 150
         }
       });

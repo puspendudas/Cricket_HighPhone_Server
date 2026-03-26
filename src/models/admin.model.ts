@@ -49,9 +49,9 @@ const adminSchema = new Schema<AdminDocument>(
     referrals: [{ type: mongoose.Schema.Types.ObjectId, ref: "User", select: false }],
     transaction: [{ type: mongoose.Schema.Types.ObjectId, ref: "Transaction", select: false }],
     bm_lock: { type: [mongoose.Schema.Types.ObjectId], ref: "Match", select: true, default: [] },
-    bm_lock_status: { type: Boolean, default: true, select: true },
+    bm_lock_status: { type: Boolean, default: false, select: true },
     fancy_lock: { type: [mongoose.Schema.Types.ObjectId], ref: "Match", select: true, default: [] },
-    fancy_lock_status: { type: Boolean, default: true, select: true },
+    fancy_lock_status: { type: Boolean, default: false, select: true },
   },
   { timestamps: true },
 );

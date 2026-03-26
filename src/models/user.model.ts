@@ -46,6 +46,8 @@ const userSchema = new Schema<UserDocument>(
     betting: { type: Boolean, default: false },
     transfer: { type: Boolean, default: false },
     fcm: { type: String, default: '-' },
+    session_token: { type: String, default: null, select: false },
+    session_updated_at: { type: Date, default: null, select: false },
     personal_notification: { type: Boolean, default: true },
     main_notification: { type: Boolean, default: true },
     starline_notification: { type: Boolean, default: true },

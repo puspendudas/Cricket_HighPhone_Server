@@ -41,6 +41,9 @@ import { User } from '@/interfaces/users.interface';
 import { buildHierarchy } from '@/utils/hierarchy';
 import HierarchyService from '@/services/hierarchy.service';
 import { logger } from '@/utils/logger';
+import { terminalSocketClient } from '@/services/terminalSocketClient';
+import { matchCache } from '@/services/matchCache.service';
+import { socketService } from '@/services/socket.service';
 
 /**
  * MatchBetService - Core service for handling cricket match betting operations
@@ -201,6 +204,70 @@ class MatchBetService {
    * @returns {Promise<void>} A promise that resolves after the delay
    */
   private delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+  /**
+   * Get admin IDs in user's hierarchy chain (user's agent + all parents).
+   * Used to evaluate global lock: if any admin in chain has *_lock_status === false, that type is locked.
+   */
+  private async getAdminIdsInHierarchyChain(agentId: string): Promise<string[]> {
+    const ids: string[] = [agentId];
+    const recurse = async (currentId: string): Promise<void> => {
+      const admin = await this.admin.findById(currentId).select('parent_id').lean();
+      if (admin?.parent_id) {
+        ids.push(admin.parent_id.toString());
+        await recurse(admin.parent_id.toString());
+      }
+    };
+    await recurse(agentId);
+    return ids;
+  }
+
+  /**
+   * Effective global lock for user's hierarchy. *_lock_status === true means locked, === false means unlocked.
+   */
+  private async getEffectiveGlobalLockForUser(user: { agent_id?: any }): Promise<{ bookmakerLocked: boolean; fancyLocked: boolean }> {
+    if (!user?.agent_id) return { bookmakerLocked: false, fancyLocked: false };
+    const adminIds = await this.getAdminIdsInHierarchyChain(user.agent_id.toString());
+    if (!adminIds.length) return { bookmakerLocked: false, fancyLocked: false };
+    const admins = await this.admin.find({ _id: { $in: adminIds } }).select('bm_lock_status fancy_lock_status').lean();
+    const bookmakerLocked = admins.some((a: any) => a.bm_lock_status === true);
+    const fancyLocked = admins.some((a: any) => a.fancy_lock_status === true);
+    return { bookmakerLocked: !!bookmakerLocked, fancyLocked: !!fancyLocked };
+  }
+
+  /**
+   * Effective per-match lock for user's hierarchy.
+   * Lock is considered active if present on user arrays OR any admin in the user's hierarchy chain.
+   */
+  private async getEffectivePerMatchLockForUser(
+    user: { agent_id?: any; bm_lock?: any[]; fancy_lock?: any[] },
+    matchId: string
+  ): Promise<{ bookmakerLocked: boolean; fancyLocked: boolean }> {
+    const userBookmakerLocked = Array.isArray(user?.bm_lock) && user.bm_lock.some(id => id.toString() === matchId);
+    const userFancyLocked = Array.isArray(user?.fancy_lock) && user.fancy_lock.some(id => id.toString() === matchId);
+
+    if (!user?.agent_id) {
+      return { bookmakerLocked: !!userBookmakerLocked, fancyLocked: !!userFancyLocked };
+    }
+
+    const adminIds = await this.getAdminIdsInHierarchyChain(user.agent_id.toString());
+    if (!adminIds.length) {
+      return { bookmakerLocked: !!userBookmakerLocked, fancyLocked: !!userFancyLocked };
+    }
+
+    const admins = await this.admin.find({ _id: { $in: adminIds } }).select('bm_lock fancy_lock').lean();
+    const adminBookmakerLocked = admins.some(
+      (a: any) => Array.isArray(a?.bm_lock) && a.bm_lock.some(id => id.toString() === matchId)
+    );
+    const adminFancyLocked = admins.some(
+      (a: any) => Array.isArray(a?.fancy_lock) && a.fancy_lock.some(id => id.toString() === matchId)
+    );
+
+    return {
+      bookmakerLocked: !!(userBookmakerLocked || adminBookmakerLocked),
+      fancyLocked: !!(userFancyLocked || adminFancyLocked),
+    };
+  }
 
   // ========================================
   // CALCULATION METHODS - WINNINGS & PROFIT/LOSS
@@ -412,11 +479,13 @@ class MatchBetService {
   public async createMatchBet(betData: CreateMatchBetDto): Promise<MatchBet & { profitLossBreakdown?: Record<string, number>; updatedExposure?: number; availableBalance?: number; }> {
     if (isEmpty(betData)) throw new HttpException(400, 'Bet data is empty');
 
-    // Validate user exists and has sufficient balance
-    const user = await this.user.findById(betData.user_id);
+    // Validate user exists and has sufficient balance (select agent_id for hierarchy lock check)
+    const user = await this.user.findById(betData.user_id).select('+agent_id');
     if (!user) throw new HttpException(404, 'User not found');
 
     if (!user.status) throw new HttpException(404, `User's Bet Locked`);
+    // betting true = locked; betting false = allowed
+    if (user.betting) throw new HttpException(404, `User's Bet Locked`);
 
     // const stake = Number(betData.stake_amount);
     // const odds = Number(betData.odds_rate);
@@ -431,12 +500,56 @@ class MatchBetService {
     //   throw new HttpException(400, 'Insufficient balance');
     // }
 
-    // Validate match exists and is active
+    // Validate match exists and is active + undeclared
     const match = await this.match.findById(betData.match_id);
     if (!match) throw new HttpException(404, 'Match not found');
 
     if (!match.status) {
       throw new HttpException(400, 'Match is not active for betting');
+    }
+    if (match.declared) {
+      throw new HttpException(400, 'Match is declared');
+    }
+
+    // Global hierarchy lock: block by bet type when lock is on for user's hierarchy
+    const globalLock = await this.getEffectiveGlobalLockForUser(user);
+    if (betData.bet_type === MatchBetType.BOOKMAKER && globalLock.bookmakerLocked) {
+      throw new HttpException(403, 'Bookmaker betting is globally locked');
+    }
+    if (betData.bet_type === MatchBetType.FANCY && globalLock.fancyLocked) {
+      throw new HttpException(403, 'Fancy betting is globally locked');
+    }
+
+    // Per-market/per-match hierarchy lock: type-specific and independent
+    let lockTargetMatchId = match._id.toString();
+    if (betData.bet_type === MatchBetType.FANCY) {
+      const marketId = (betData.market_id || '').toString().trim();
+      if (marketId) {
+        // Fancy market IDs live in fancyOdds, not the match collection.
+        // First try direct match lookup; fall back to fancyOdds → matchId.
+        let marketMatch = await this.match.findOne({ marketId }).select('_id status declared').lean();
+        if (!marketMatch) {
+          const fancy = await this.fancyOdds.findOne({ marketId }).select('matchId').lean();
+          if (fancy?.matchId) {
+            marketMatch = await this.match.findById(fancy.matchId).select('_id status declared').lean();
+          }
+        }
+        if (!marketMatch) {
+          throw new HttpException(400, 'No match found for provided market ID');
+        }
+        if (!marketMatch.status || marketMatch.declared) {
+          throw new HttpException(400, 'Match is not active for betting');
+        }
+        lockTargetMatchId = marketMatch._id.toString();
+      }
+    }
+
+    const perMatchLock = await this.getEffectivePerMatchLockForUser(user as any, lockTargetMatchId);
+    if (betData.bet_type === MatchBetType.BOOKMAKER && perMatchLock.bookmakerLocked) {
+      throw new HttpException(403, 'Bookmaker betting is locked for this market');
+    }
+    if (betData.bet_type === MatchBetType.FANCY && perMatchLock.fancyLocked) {
+      throw new HttpException(403, 'Fancy betting is locked for this market');
     }
 
     // === delay before updating match ===
@@ -1118,6 +1231,16 @@ class MatchBetService {
       { $set: { wonby: winTeam, declared: true } }
     );
 
+    if (match.gameId) {
+      terminalSocketClient.unsubscribeFromMatch(match.gameId);
+    }
+
+    if (match.eventId) {
+      const eventId = match.eventId.toString();
+      await matchCache.remove(eventId);
+      socketService.emitMatchDeclared(eventId);
+    }
+
     if (matchExposure.length === 0) {
       return { message: "No bets found to settle" };
     }
@@ -1417,6 +1540,10 @@ class MatchBetService {
       { _id: matchObjectId },
       { $set: { wonby: null, declared: true } }
     );
+
+    if (match.gameId) {
+      terminalSocketClient.unsubscribeFromMatch(match.gameId);
+    }
 
     if (matchExposure.length === 0) {
       return { message: "No bets found to cancel" };
@@ -2905,7 +3032,6 @@ class MatchBetService {
       {
         $set: {
           isDeclared: false,
-          isAuto: false,
           isActive: true,
           resultScore: null,
           settledAt: new Date()
@@ -3367,6 +3493,18 @@ class MatchBetService {
       availableBalance,
       updatedExposure: exposureData,
     };
+  }
+
+  public async showCancelledSingleBet(betId: string) {
+    const betObjectId = new ObjectId(betId);
+    const cancelledBet = await this.matchBet.findOne({
+      _id: betObjectId,
+      status: MatchBetStatus.DELETED
+    });
+    if (!cancelledBet) {
+      throw new HttpException(404, 'Bet not found');
+    }
+    return cancelledBet;
   }
 
   private async calculateTeamExposureReduction(userId: string, matchId: string, selectionId?: number): Promise<{ profitLossBreakdown: Record<string, number>; totalExposure: number; }> {

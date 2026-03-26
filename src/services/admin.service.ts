@@ -318,7 +318,12 @@ class AdminService {
 
   public async getAllAdmin(userData: GetAllAdminDto, adminData: Admin): Promise<{ total: number; admin: Admin[] }> {
     // userData contains the query, e.g. { type: "super_agent" }
-    const query: any = { ...userData };
+    const query: any = Object.keys(userData).reduce((acc, key) => {
+      if (userData[key as keyof GetAllAdminDto] !== undefined) {
+        acc[key] = userData[key as keyof GetAllAdminDto];
+      }
+      return acc;
+    }, {} as any);
 
     // If the logged-in admin is NOT super_admin → filter by descendants
     if (adminData.type !== "super_admin") {
@@ -864,16 +869,17 @@ class AdminService {
       // const hashedPassword = await encrypt("admin", 10);
       if (!foundAdmin) {
         const newAdmin = new this.admin({
-          user_name: "superadmin",
+          user_name: "SUPERADMIN",
           namd: "Super Admin",
-          mobile: "1234567890",
           password: await encrypt("admin123", 10),
           type: "super_admin",
           status: true,
           transfer: true,
           parent_id: null,
           sub_admin_list: [],
-          share: 0,
+          wallet: 10000000000,
+          exposure: 0,
+          share: 100,
           match_commission: 0,
           session_commission: 0,
           casino_commission: 0,
@@ -989,6 +995,30 @@ class AdminService {
       console.error(`Error querying transactions or deleting files:`, error);
       throw error; // You may handle or log this error as needed
     }
+  }
+
+  /**
+   * Returns whether any ancestor admin has globally locked bookmaker or fancy bets.
+   * Used by the /me endpoint so the UI can disable lock toggles when a parent has locked.
+   */
+  public async getAdminLockContext(adminId: string): Promise<{ isBmLockedByParent: boolean; isFancyLockedByParent: boolean }> {
+    const parentIds: string[] = [];
+    let currentId = adminId.toString();
+
+    while (true) {
+      const current = await this.admin.findById(currentId).select('parent_id').lean();
+      if (!current?.parent_id) break;
+      parentIds.push(current.parent_id.toString());
+      currentId = current.parent_id.toString();
+    }
+
+    if (!parentIds.length) return { isBmLockedByParent: false, isFancyLockedByParent: false };
+
+    const parentDocs = await this.admin.find({ _id: { $in: parentIds } }).select('bm_lock_status fancy_lock_status').lean();
+    return {
+      isBmLockedByParent: parentDocs.some((d: any) => d.bm_lock_status === true),
+      isFancyLockedByParent: parentDocs.some((d: any) => d.fancy_lock_status === true),
+    };
   }
 
 }

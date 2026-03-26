@@ -12,6 +12,7 @@ import BetModel from '@/models/bet.model';
 import { Admin } from '@/interfaces/admin.interface';
 import AdminModel from '@/models/admin.model';
 import MatchModel from '@/models/match.model';
+import FancyOddsModel from '@/models/fancyodds.model';
 import { UpdateLimitDto } from '@/dtos/admin.dto';
 import WalletHistoryModel from '@/models/walletHistory.model';
 
@@ -19,6 +20,7 @@ class UserService {
   public users = UserModel;
   public admin = AdminModel;
   public match = MatchModel;
+  public fancyOdds = FancyOddsModel;
   public transaction = TransactionModel;
   public bet = BetModel;
   public walletHistory = WalletHistoryModel;
@@ -236,6 +238,13 @@ class UserService {
     const { skip, count, ...rest } = queryParams;
     const query: Record<string, any> = { ...rest };
 
+    // Clean up undefined fields from the query
+    for (const key in query) {
+      if (query[key] === undefined) {
+        delete query[key];
+      }
+    }
+
     // 🔑 Restrict to users under this admin’s hierarchy
     const allAgents = await this.getAllAgentsUnder(loggedInAdmin._id.toString());
 
@@ -304,26 +313,21 @@ class UserService {
   }
 
   /**
-   * Check if an admin has permission to toggle a match lock
-   * Only the admin who locked it or their parents can unlock it
+   * Check if an admin has permission to toggle a match lock.
+   * Rules:
+   * - If match is unlocked, any admin can lock for their hierarchy.
+   * - If match is locked, only the same admin (lock owner) can unlock.
    */
-  private async checkBmLockPermission(adminId: string, matchId: string): Promise<boolean> {
+  private async checkBmLockPermission(_adminId: string, matchId: string): Promise<boolean> {
     const match = await this.match.findById(matchId).select('bm_lock');
     if (!match) return false;
 
-    // If no one has locked this match, anyone can lock it
-    if (match.bm_lock.length === 0) return true;
-
-    // Check if the current admin is one of the admins who locked this match
-    if (match.bm_lock.includes(adminId)) return true;
-
-    // Check if any of the current admin's parents locked this match
-    const parentAdmins = await this.getAllParentAdmins(adminId);
-    const hasParentLock = match.bm_lock.some(lockedAdminId =>
-      parentAdmins.some(parentId => parentId.toString() === lockedAdminId.toString())
-    );
-
-    return hasParentLock;
+    // Each hierarchy branch (including sibling branches) may independently lock/unlock.
+    // Parent-enforced lock prevention is already handled by hasParentPerMatchLockEnabled.
+    // The lock/unlock state machine in the caller prevents cross-sibling unlocking:
+    // SA2 cannot unlock SA1's lock because isAlreadyLocked and isMatchLockedByAdmin
+    // would both be false, routing to the LOCK branch instead.
+    return true;
   }
 
   /**
@@ -345,26 +349,69 @@ class UserService {
   }
 
   /**
-   * Check if an admin has permission to toggle a fancy match lock
-   * Only the admin who locked it or their parents can unlock it
+   * Get all descendant admins down the hierarchy.
    */
-  private async checkFancyLockPermission(adminId: string, matchId: string): Promise<boolean> {
+  private async getAllChildAdmins(adminId: string): Promise<string[]> {
+    const children: string[] = [];
+    const recurse = async (parentId: string): Promise<void> => {
+      const directChildren = await this.admin.find({ parent_id: parentId }).select('_id').lean();
+      for (const child of directChildren) {
+        const childId = child._id.toString();
+        children.push(childId);
+        await recurse(childId);
+      }
+    };
+    await recurse(adminId);
+    return children;
+  }
+
+  /**
+   * Returns true when any parent admin enforces a global lock for the given type.
+   * lock_status semantics: true => locked, false => unlocked.
+   */
+  private async hasParentGlobalLockEnabled(adminId: string, lockType: 'bm' | 'fancy'): Promise<boolean> {
+    const parentAdmins = await this.getAllParentAdmins(adminId);
+    if (!parentAdmins.length) return false;
+
+    const selectField = lockType === 'bm' ? 'bm_lock_status' : 'fancy_lock_status';
+    const parentDocs = await this.admin.find({ _id: { $in: parentAdmins } }).select(selectField).lean();
+    return parentDocs.some((doc: any) =>
+      lockType === 'bm' ? doc?.bm_lock_status === true : doc?.fancy_lock_status === true
+    );
+  }
+
+  /**
+   * Returns true when any parent admin has lock applied on the given match.
+   */
+  private async hasParentPerMatchLockEnabled(adminId: string, matchId: string, lockType: 'bm' | 'fancy'): Promise<boolean> {
+    const parentAdmins = await this.getAllParentAdmins(adminId);
+    if (!parentAdmins.length) return false;
+
+    const match = await this.match.findById(matchId).select(lockType === 'bm' ? 'bm_lock' : 'fancy_lock').lean();
+    if (!match) return false;
+
+    const lockedAdminIds: string[] = (lockType === 'bm'
+      ? (match as any).bm_lock
+      : (match as any).fancy_lock
+    )?.map((id: any) => id.toString()) || [];
+
+    return parentAdmins.some(parentId => lockedAdminIds.includes(parentId));
+  }
+
+  /**
+   * Check if an admin has permission to toggle a fancy match lock.
+   * Rules mirror bookmaker lock ownership checks.
+   */
+  private async checkFancyLockPermission(_adminId: string, matchId: string): Promise<boolean> {
     const match = await this.match.findById(matchId).select('fancy_lock');
     if (!match) return false;
 
-    // If no one has locked this match, anyone can lock it
-    if (match.fancy_lock.length === 0) return true;
-
-    // Check if the current admin is one of the admins who locked this match
-    if (match.fancy_lock.includes(adminId)) return true;
-
-    // Check if any of the current admin's parents locked this match
-    const parentAdmins = await this.getAllParentAdmins(adminId);
-    const hasParentLock = match.fancy_lock.some(lockedAdminId =>
-      parentAdmins.some(parentId => parentId.toString() === lockedAdminId.toString())
-    );
-
-    return hasParentLock;
+    // Each hierarchy branch (including sibling branches) may independently lock/unlock.
+    // Parent-enforced lock prevention is already handled by hasParentPerMatchLockEnabled.
+    // The lock/unlock state machine in the caller prevents cross-sibling unlocking:
+    // SA2 cannot unlock SA1's lock because isAlreadyLocked and isMatchLockedByAdmin
+    // would both be false, routing to the LOCK branch instead.
+    return true;
   }
 
   public async getAllUsersApp(userData: GetAllUserQuery): Promise<{ total: number, users: User[] }> {
@@ -479,54 +526,105 @@ class UserService {
     return foundUser;
   }
 
+  /**
+   * Resolve match for lock operations.
+   * marketId (mid) is preferred; matchId is fallback for backward compatibility.
+   */
+  private async resolveMatchForLock(matchId?: string, marketId?: string, mid?: string) {
+    const resolvedMarketId = (marketId || mid || '').toString().trim();
+    if (resolvedMarketId) {
+      // 1) Direct match lookup by match.marketId
+      const byMarket = await this.match.findOne({ marketId: resolvedMarketId });
+      if (byMarket) return byMarket;
+
+      // 2) Fancy market lookup by fancyOdds.marketId -> fancyOdds.matchId
+      const fancy = await this.fancyOdds.findOne({ marketId: resolvedMarketId }).select('matchId').lean();
+      if (fancy?.matchId) {
+        const byFancyMatchId = await this.match.findById(fancy.matchId);
+        if (byFancyMatchId) return byFancyMatchId;
+      }
+    }
+    if (matchId) {
+      const byId = await this.match.findById(matchId.toString().trim());
+      if (byId) return byId;
+    }
+    throw new HttpException(400, "No match found for the provided marketId/matchId");
+  }
+
+  /** Lock operations are allowed only for active + undeclared matches. */
+  private ensureMatchLockEligible(foundMatch: any): void {
+    if (!foundMatch?.status || foundMatch?.declared) {
+      throw new HttpException(400, "Lock can be updated only for active and undeclared matches");
+    }
+  }
+
   public async updateUserMatchBmLock(userData: UpdateUserMatchLockDto): Promise<{ message: string }> {
     if (isEmpty(userData)) throw new HttpException(400, 'User Data is empty');
 
-    const { adminId, matchId } = userData;
-
-    const foundMatch = await this.match.findById(matchId);
-    if (!foundMatch) throw new HttpException(400, "No match found for the id");
+    const { adminId, matchId, marketId } = userData;
+    const foundMatch = await this.resolveMatchForLock(matchId, marketId, (userData as any).mid);
+    this.ensureMatchLockEligible(foundMatch);
+    const resolvedMatchId = foundMatch._id.toString();
 
     const foundAdmin = await this.admin.findById(adminId);
     if (!foundAdmin) throw new HttpException(400, "No admin found for the id");
 
+    // Parent/senior hierarchy lock override.
+    if (await this.hasParentGlobalLockEnabled(adminId, 'bm')) {
+      throw new HttpException(403, "Bookmaker lock is enforced by parent hierarchy");
+    }
+    if (await this.hasParentPerMatchLockEnabled(adminId, resolvedMatchId, 'bm')) {
+      throw new HttpException(403, "Bookmaker lock is enforced by parent hierarchy for this match");
+    }
+
     // Check if the current admin has permission to toggle this match
-    const hasPermission = await this.checkBmLockPermission(adminId, matchId);
+    const hasPermission = await this.checkBmLockPermission(adminId, resolvedMatchId);
     if (!hasPermission) {
       throw new HttpException(403, "You don't have permission to toggle this match lock");
     }
 
     // Check if the match is already locked by this admin
-    const isAlreadyLocked = foundAdmin.bm_lock.includes(matchId);
-    const isMatchLockedByAdmin = foundMatch.bm_lock.includes(adminId);
+    const isAlreadyLocked = foundAdmin.bm_lock.some(id => id.toString() === resolvedMatchId);
+    const isMatchLockedByAdmin = foundMatch.bm_lock.some(id => id.toString() === adminId);
 
     if (isAlreadyLocked && isMatchLockedByAdmin) {
       // Unlock: Remove from both admin and match
-      foundAdmin.bm_lock = foundAdmin.bm_lock.filter(id => id.toString() !== matchId);
-      foundMatch.bm_lock = foundMatch.bm_lock.filter(id => id.toString() !== adminId);
+      foundAdmin.bm_lock = foundAdmin.bm_lock.filter(id => id.toString() !== resolvedMatchId);
+      const descendantAdminIds = await this.getAllChildAdmins(adminId);
+      foundMatch.bm_lock = foundMatch.bm_lock.filter(id => {
+        const lockOwnerId = id.toString();
+        return lockOwnerId !== adminId && !descendantAdminIds.includes(lockOwnerId);
+      });
 
       // Get all users under this admin and remove matchId from their bm_lock
       const usersUnderAdmin = await this.getAllUsersUnderAdmin(adminId);
       await this.users.updateMany(
         { _id: { $in: usersUnderAdmin } },
-        { $pull: { bm_lock: matchId } }
+        { $pull: { bm_lock: resolvedMatchId } }
       );
 
-      await Promise.all([foundAdmin.save(), foundMatch.save()]);
+      await Promise.all([
+        this.admin.updateMany({ _id: { $in: descendantAdminIds } }, { $pull: { bm_lock: resolvedMatchId } }),
+        this.admin.updateOne({ _id: adminId }, { $set: { bm_lock: foundAdmin.bm_lock } }),
+        this.match.updateOne({ _id: resolvedMatchId }, { $set: { bm_lock: foundMatch.bm_lock } }),
+      ]);
       return { message: "Bookmaker unlocked successfully" };
     } else if (!isAlreadyLocked && !isMatchLockedByAdmin) {
       // Lock: Add to both admin and match
-      foundAdmin.bm_lock.push(matchId);
+      foundAdmin.bm_lock.push(resolvedMatchId);
       foundMatch.bm_lock.push(adminId);
 
       // Get all users under this admin and add matchId to their bm_lock
       const usersUnderAdmin = await this.getAllUsersUnderAdmin(adminId);
       await this.users.updateMany(
         { _id: { $in: usersUnderAdmin } },
-        { $addToSet: { bm_lock: matchId } }
+        { $addToSet: { bm_lock: resolvedMatchId } }
       );
 
-      await Promise.all([foundAdmin.save(), foundMatch.save()]);
+      await Promise.all([
+        this.admin.updateOne({ _id: adminId }, { $set: { bm_lock: foundAdmin.bm_lock } }),
+        this.match.updateOne({ _id: resolvedMatchId }, { $set: { bm_lock: foundMatch.bm_lock } }),
+      ]);
       return { message: "Bookmaker locked successfully" };
     } else {
       throw new HttpException(400, "Match lock state is inconsistent. Please contact support.");
@@ -536,80 +634,103 @@ class UserService {
   public async updateUserAllMatchBmLock(userData: UpdateUserAllMatchLockDto): Promise<{ message: string }> {
     if (isEmpty(userData)) throw new HttpException(400, 'User Data is empty');
 
-    const { adminId, matchId } = userData;
+    const { adminId, matchId, marketId } = userData;
 
     const foundAdmin = await this.admin.findById(adminId);
     if (!foundAdmin) throw new HttpException(400, "No admin found for the id");
 
+    // Parent hierarchy override: child cannot change global bookmaker lock when parent has it enabled (locked).
+    if (await this.hasParentGlobalLockEnabled(adminId, 'bm')) {
+      throw new HttpException(403, "Bookmaker global lock is enforced by parent hierarchy");
+    }
+
     // Get all users under this admin
     const usersUnderAdmin = await this.getAllUsersUnderAdmin(adminId);
 
-    if (matchId) {
-      // If specific matchId is provided, handle single match
-      const foundMatch = await this.match.findById(matchId);
-      if (!foundMatch) throw new HttpException(400, "No match found for the id");
+    if (matchId || marketId) {
+      // If specific match target is provided, handle single match (marketId preferred)
+      const foundMatch = await this.resolveMatchForLock(matchId, marketId, (userData as any).mid);
+      this.ensureMatchLockEligible(foundMatch);
+      const resolvedMatchId = foundMatch._id.toString();
+
+      if (await this.hasParentPerMatchLockEnabled(adminId, resolvedMatchId, 'bm')) {
+        throw new HttpException(403, "Bookmaker lock is enforced by parent hierarchy for this match");
+      }
 
       // Check if the current admin has permission to toggle this match
-      const hasPermission = await this.checkBmLockPermission(adminId, matchId);
+      const hasPermission = await this.checkBmLockPermission(adminId, resolvedMatchId);
       if (!hasPermission) {
         throw new HttpException(403, "You don't have permission to toggle this match lock");
       }
 
       // Check if the match is already locked by this admin
-      const isAlreadyLocked = foundAdmin.bm_lock.includes(matchId);
-      const isMatchLockedByAdmin = foundMatch.bm_lock.includes(adminId);
+      const isAlreadyLocked = foundAdmin.bm_lock.some(id => id.toString() === resolvedMatchId);
+      const isMatchLockedByAdmin = foundMatch.bm_lock.some(id => id.toString() === adminId);
 
       if (isAlreadyLocked && isMatchLockedByAdmin) {
         // Unlock: Remove from both admin and match
-        foundAdmin.bm_lock = foundAdmin.bm_lock.filter(id => id.toString() !== matchId);
-        foundMatch.bm_lock = foundMatch.bm_lock.filter(id => id.toString() !== adminId);
+        foundAdmin.bm_lock = foundAdmin.bm_lock.filter(id => id.toString() !== resolvedMatchId);
+        const descendantAdminIds = await this.getAllChildAdmins(adminId);
+        foundMatch.bm_lock = foundMatch.bm_lock.filter(id => {
+          const lockOwnerId = id.toString();
+          return lockOwnerId !== adminId && !descendantAdminIds.includes(lockOwnerId);
+        });
 
         // Remove matchId from all users under this admin
         await this.users.updateMany(
           { _id: { $in: usersUnderAdmin } },
-          { $pull: { bm_lock: matchId } }
+          { $pull: { bm_lock: resolvedMatchId } }
         );
 
-        await Promise.all([foundAdmin.save(), foundMatch.save()]);
+        await Promise.all([
+          this.admin.updateMany({ _id: { $in: descendantAdminIds } }, { $pull: { bm_lock: resolvedMatchId } }),
+          this.admin.updateOne({ _id: adminId }, { $set: { bm_lock: foundAdmin.bm_lock } }),
+          this.match.updateOne({ _id: resolvedMatchId }, { $set: { bm_lock: foundMatch.bm_lock } }),
+        ]);
         return { message: "Bookmaker unlocked successfully for match" };
       } else if (!isAlreadyLocked && !isMatchLockedByAdmin) {
         // Lock: Add to both admin and match
-        foundAdmin.bm_lock.push(matchId);
+        foundAdmin.bm_lock.push(resolvedMatchId);
         foundMatch.bm_lock.push(adminId);
 
         // Add matchId to all users under this admin
         await this.users.updateMany(
           { _id: { $in: usersUnderAdmin } },
-          { $addToSet: { bm_lock: matchId } }
+          { $addToSet: { bm_lock: resolvedMatchId } }
         );
 
-        await Promise.all([foundAdmin.save(), foundMatch.save()]);
+        await Promise.all([
+          this.admin.updateOne({ _id: adminId }, { $set: { bm_lock: foundAdmin.bm_lock } }),
+          this.match.updateOne({ _id: resolvedMatchId }, { $set: { bm_lock: foundMatch.bm_lock } }),
+        ]);
         return { message: "Bookmaker locked successfully for match" };
       } else {
         throw new HttpException(400, "Match lock state is inconsistent. Please contact support.");
       }
     } else {
-      // If no matchId provided, handle all matches
-      // Get all active matches
-      const allMatches = await this.match.find({ status: true }).select('_id bm_lock');
+      // If no matchId provided, handle all matches (active + undeclared only)
+      const allMatches = await this.match.find({ status: true, declared: false }).select('_id bm_lock');
 
-      // Check if admin has any locked matches
-      const hasLockedMatches = foundAdmin.bm_lock.length > 0;
+      // Source of truth for global all-lock state
+      const hasLockedMatches = foundAdmin.bm_lock_status === true;
 
       if (hasLockedMatches) {
-        // Unlock all matches
-        const matchIds = foundAdmin.bm_lock;
+        // Unlock all active + undeclared matches for this admin
+        const matchIds = allMatches.map(match => match._id.toString());
+        const descendantAdminIds = await this.getAllChildAdmins(adminId);
+        const hierarchyAdminIds = [adminId, ...descendantAdminIds];
 
-        // Remove admin from all matches
+        // Remove hierarchy admins from all active undeclared matches
         await this.match.updateMany(
-          { _id: { $in: matchIds } },
-          { $pull: { bm_lock: adminId } }
+          { status: true, declared: false, bm_lock: { $in: hierarchyAdminIds } },
+          { $pull: { bm_lock: { $in: hierarchyAdminIds } } }
         );
 
-        // Clear admin's bm_lock
-        foundAdmin.bm_lock = [];
-        foundAdmin.bm_lock_status = true;
-        await foundAdmin.save();
+        // Clear own + descendants bm lock states
+        await this.admin.updateMany(
+          { _id: { $in: hierarchyAdminIds } },
+          { $set: { bm_lock: [], bm_lock_status: false } }
+        );
 
         // Remove all match IDs from all users under this admin
         await this.users.updateMany(
@@ -630,8 +751,11 @@ class UserService {
 
         // Add all match IDs to admin's bm_lock
         foundAdmin.bm_lock = matchIds;
-        foundAdmin.bm_lock_status = false;
-        await foundAdmin.save();
+        foundAdmin.bm_lock_status = true;
+        await this.admin.updateOne(
+          { _id: adminId },
+          { $set: { bm_lock: foundAdmin.bm_lock, bm_lock_status: true } }
+        );
 
         // Add all match IDs to all users under this admin
         await this.users.updateMany(
@@ -647,51 +771,70 @@ class UserService {
   public async updateUserMatchFancyLock(userData: UpdateUserMatchLockDto): Promise<{ message: string }> {
     if (isEmpty(userData)) throw new HttpException(400, 'User Data is empty');
 
-    const { adminId, matchId } = userData;
-
-    const foundMatch = await this.match.findById(matchId);
-    if (!foundMatch) throw new HttpException(400, "No match found for the id");
+    const { adminId, matchId, marketId } = userData;
+    const foundMatch = await this.resolveMatchForLock(matchId, marketId, (userData as any).mid);
+    this.ensureMatchLockEligible(foundMatch);
+    const resolvedMatchId = foundMatch._id.toString();
 
     const foundAdmin = await this.admin.findById(adminId);
     if (!foundAdmin) throw new HttpException(400, "No admin found for the id");
 
+    // Parent/senior hierarchy lock override.
+    if (await this.hasParentGlobalLockEnabled(adminId, 'fancy')) {
+      throw new HttpException(403, "Fancy lock is enforced by parent hierarchy");
+    }
+    if (await this.hasParentPerMatchLockEnabled(adminId, resolvedMatchId, 'fancy')) {
+      throw new HttpException(403, "Fancy lock is enforced by parent hierarchy for this match");
+    }
+
     // Check if the current admin has permission to toggle this match
-    const hasPermission = await this.checkFancyLockPermission(adminId, matchId);
+    const hasPermission = await this.checkFancyLockPermission(adminId, resolvedMatchId);
     if (!hasPermission) {
       throw new HttpException(403, "You don't have permission to toggle this match lock");
     }
 
     // Check if the match is already locked by this admin
-    const isAlreadyLocked = foundAdmin.fancy_lock.includes(matchId);
-    const isMatchLockedByAdmin = foundMatch.fancy_lock.includes(adminId);
+    const isAlreadyLocked = foundAdmin.fancy_lock.some(id => id.toString() === resolvedMatchId);
+    const isMatchLockedByAdmin = foundMatch.fancy_lock.some(id => id.toString() === adminId);
 
     if (isAlreadyLocked && isMatchLockedByAdmin) {
       // Unlock: Remove from both admin and match
-      foundAdmin.fancy_lock = foundAdmin.fancy_lock.filter(id => id.toString() !== matchId);
-      foundMatch.fancy_lock = foundMatch.fancy_lock.filter(id => id.toString() !== adminId);
+      foundAdmin.fancy_lock = foundAdmin.fancy_lock.filter(id => id.toString() !== resolvedMatchId);
+      const descendantAdminIds = await this.getAllChildAdmins(adminId);
+      foundMatch.fancy_lock = foundMatch.fancy_lock.filter(id => {
+        const lockOwnerId = id.toString();
+        return lockOwnerId !== adminId && !descendantAdminIds.includes(lockOwnerId);
+      });
 
       // Get all users under this admin and remove matchId from their fancy_lock
       const usersUnderAdmin = await this.getAllUsersUnderAdmin(adminId);
       await this.users.updateMany(
         { _id: { $in: usersUnderAdmin } },
-        { $pull: { fancy_lock: matchId } }
+        { $pull: { fancy_lock: resolvedMatchId } }
       );
 
-      await Promise.all([foundAdmin.save(), foundMatch.save()]);
+      await Promise.all([
+        this.admin.updateMany({ _id: { $in: descendantAdminIds } }, { $pull: { fancy_lock: resolvedMatchId } }),
+        this.admin.updateOne({ _id: adminId }, { $set: { fancy_lock: foundAdmin.fancy_lock } }),
+        this.match.updateOne({ _id: resolvedMatchId }, { $set: { fancy_lock: foundMatch.fancy_lock } }),
+      ]);
       return { message: "Fancy unlocked successfully" };
     } else if (!isAlreadyLocked && !isMatchLockedByAdmin) {
       // Lock: Add to both admin and match
-      foundAdmin.fancy_lock.push(matchId);
+      foundAdmin.fancy_lock.push(resolvedMatchId);
       foundMatch.fancy_lock.push(adminId);
 
       // Get all users under this admin and add matchId to their fancy_lock
       const usersUnderAdmin = await this.getAllUsersUnderAdmin(adminId);
       await this.users.updateMany(
         { _id: { $in: usersUnderAdmin } },
-        { $addToSet: { fancy_lock: matchId } }
+        { $addToSet: { fancy_lock: resolvedMatchId } }
       );
 
-      await Promise.all([foundAdmin.save(), foundMatch.save()]);
+      await Promise.all([
+        this.admin.updateOne({ _id: adminId }, { $set: { fancy_lock: foundAdmin.fancy_lock } }),
+        this.match.updateOne({ _id: resolvedMatchId }, { $set: { fancy_lock: foundMatch.fancy_lock } }),
+      ]);
       return { message: "Fancy locked successfully" };
     } else {
       throw new HttpException(400, "Match lock state is inconsistent. Please contact support.");
@@ -701,80 +844,103 @@ class UserService {
   public async updateUserAllMatchFancyLock(userData: UpdateUserAllMatchLockDto): Promise<{ message: string }> {
     if (isEmpty(userData)) throw new HttpException(400, 'User Data is empty');
 
-    const { adminId, matchId } = userData;
+    const { adminId, matchId, marketId } = userData;
 
     const foundAdmin = await this.admin.findById(adminId);
     if (!foundAdmin) throw new HttpException(400, "No admin found for the id");
 
+    // Parent hierarchy override: child cannot change global fancy lock when parent has it enabled (locked).
+    if (await this.hasParentGlobalLockEnabled(adminId, 'fancy')) {
+      throw new HttpException(403, "Fancy global lock is enforced by parent hierarchy");
+    }
+
     // Get all users under this admin
     const usersUnderAdmin = await this.getAllUsersUnderAdmin(adminId);
 
-    if (matchId) {
-      // If specific matchId is provided, handle single match
-      const foundMatch = await this.match.findById(matchId);
-      if (!foundMatch) throw new HttpException(400, "No match found for the id");
+    if (matchId || marketId) {
+      // If specific match target is provided, handle single match (marketId preferred)
+      const foundMatch = await this.resolveMatchForLock(matchId, marketId, (userData as any).mid);
+      this.ensureMatchLockEligible(foundMatch);
+      const resolvedMatchId = foundMatch._id.toString();
+
+      if (await this.hasParentPerMatchLockEnabled(adminId, resolvedMatchId, 'fancy')) {
+        throw new HttpException(403, "Fancy lock is enforced by parent hierarchy for this match");
+      }
 
       // Check if the current admin has permission to toggle this match
-      const hasPermission = await this.checkFancyLockPermission(adminId, matchId);
+      const hasPermission = await this.checkFancyLockPermission(adminId, resolvedMatchId);
       if (!hasPermission) {
         throw new HttpException(403, "You don't have permission to toggle this match lock");
       }
 
       // Check if the match is already locked by this admin
-      const isAlreadyLocked = foundAdmin.fancy_lock.includes(matchId);
-      const isMatchLockedByAdmin = foundMatch.fancy_lock.includes(adminId);
+      const isAlreadyLocked = foundAdmin.fancy_lock.some(id => id.toString() === resolvedMatchId);
+      const isMatchLockedByAdmin = foundMatch.fancy_lock.some(id => id.toString() === adminId);
 
       if (isAlreadyLocked && isMatchLockedByAdmin) {
         // Unlock: Remove from both admin and match
-        foundAdmin.fancy_lock = foundAdmin.fancy_lock.filter(id => id.toString() !== matchId);
-        foundMatch.fancy_lock = foundMatch.fancy_lock.filter(id => id.toString() !== adminId);
+        foundAdmin.fancy_lock = foundAdmin.fancy_lock.filter(id => id.toString() !== resolvedMatchId);
+        const descendantAdminIds = await this.getAllChildAdmins(adminId);
+        foundMatch.fancy_lock = foundMatch.fancy_lock.filter(id => {
+          const lockOwnerId = id.toString();
+          return lockOwnerId !== adminId && !descendantAdminIds.includes(lockOwnerId);
+        });
 
         // Remove matchId from all users under this admin
         await this.users.updateMany(
           { _id: { $in: usersUnderAdmin } },
-          { $pull: { fancy_lock: matchId } }
+          { $pull: { fancy_lock: resolvedMatchId } }
         );
 
-        await Promise.all([foundAdmin.save(), foundMatch.save()]);
+        await Promise.all([
+          this.admin.updateMany({ _id: { $in: descendantAdminIds } }, { $pull: { fancy_lock: resolvedMatchId } }),
+          this.admin.updateOne({ _id: adminId }, { $set: { fancy_lock: foundAdmin.fancy_lock } }),
+          this.match.updateOne({ _id: resolvedMatchId }, { $set: { fancy_lock: foundMatch.fancy_lock } }),
+        ]);
         return { message: "Fancy unlocked successfully for match" };
       } else if (!isAlreadyLocked && !isMatchLockedByAdmin) {
         // Lock: Add to both admin and match
-        foundAdmin.fancy_lock.push(matchId);
+        foundAdmin.fancy_lock.push(resolvedMatchId);
         foundMatch.fancy_lock.push(adminId);
 
         // Add matchId to all users under this admin
         await this.users.updateMany(
           { _id: { $in: usersUnderAdmin } },
-          { $addToSet: { fancy_lock: matchId } }
+          { $addToSet: { fancy_lock: resolvedMatchId } }
         );
 
-        await Promise.all([foundAdmin.save(), foundMatch.save()]);
+        await Promise.all([
+          this.admin.updateOne({ _id: adminId }, { $set: { fancy_lock: foundAdmin.fancy_lock } }),
+          this.match.updateOne({ _id: resolvedMatchId }, { $set: { fancy_lock: foundMatch.fancy_lock } }),
+        ]);
         return { message: "Fancy locked successfully for match" };
       } else {
         throw new HttpException(400, "Match lock state is inconsistent. Please contact support.");
       }
     } else {
-      // If no matchId provided, handle all matches
-      // Get all active matches
-      const allMatches = await this.match.find({ status: true }).select('_id fancy_lock');
+      // If no matchId provided, handle all matches (active + undeclared only)
+      const allMatches = await this.match.find({ status: true, declared: false }).select('_id fancy_lock');
 
-      // Check if admin has any locked matches
-      const hasLockedMatches = foundAdmin.fancy_lock.length > 0;
+      // Source of truth for global all-lock state
+      const hasLockedMatches = foundAdmin.fancy_lock_status === true;
 
       if (hasLockedMatches) {
-        // Unlock all matches
-        const matchIds = foundAdmin.fancy_lock;
+        // Unlock all active + undeclared matches for this admin
+        const matchIds = allMatches.map(match => match._id.toString());
+        const descendantAdminIds = await this.getAllChildAdmins(adminId);
+        const hierarchyAdminIds = [adminId, ...descendantAdminIds];
 
-        // Remove admin from all matches
+        // Remove hierarchy admins from all active undeclared matches
         await this.match.updateMany(
-          { _id: { $in: matchIds } },
-          { $pull: { fancy_lock: adminId } }
+          { status: true, declared: false, fancy_lock: { $in: hierarchyAdminIds } },
+          { $pull: { fancy_lock: { $in: hierarchyAdminIds } } }
         );
 
-        // Clear admin's fancy_lock
-        foundAdmin.fancy_lock = [];
-        foundAdmin.fancy_lock_status = true;
-        await foundAdmin.save();
+        // Clear own + descendants fancy lock states
+        await this.admin.updateMany(
+          { _id: { $in: hierarchyAdminIds } },
+          { $set: { fancy_lock: [], fancy_lock_status: false } }
+        );
 
         // Remove all match IDs from all users under this admin
         await this.users.updateMany(
@@ -795,8 +961,11 @@ class UserService {
 
         // Add all match IDs to admin's fancy_lock
         foundAdmin.fancy_lock = matchIds;
-        foundAdmin.fancy_lock_status = false;
-        await foundAdmin.save();
+        foundAdmin.fancy_lock_status = true;
+        await this.admin.updateOne(
+          { _id: adminId },
+          { $set: { fancy_lock: foundAdmin.fancy_lock, fancy_lock_status: true } }
+        );
 
         // Add all match IDs to all users under this admin
         await this.users.updateMany(
